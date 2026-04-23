@@ -113,19 +113,28 @@ export default function LeaguePage() {
 
   async function makePick(teamName, isAuto = false) {
     if (!league || !draftStarted) return
-    const tpp = 48 / league.size
-    const order = snakeOrder(league.size, 48)
-    const currentTurn = order[league.draft_pos]
-    if (!isAuto && currentTurn !== mySlot) return
+
+    // Get the FRESH draft_pos from DB to avoid stale state
+    const { data: freshLeague } = await supabase
+      .from('leagues').select('draft_pos,size').eq('id', id).single()
+    if (!freshLeague) return
+
+    const tpp = 48 / freshLeague.size
+    const order = snakeOrder(freshLeague.size, 48)
+    const currentTurn = order[freshLeague.draft_pos]
+
+    // Verify it is actually this player's turn
+    if (currentTurn !== mySlot) return
     if (picks[teamName]) return
+
     const myPickCount = Object.entries(picks).filter(([, uid]) => uid === user.id).length
     if (myPickCount >= tpp) return
 
-    // Just record this pick and advance by exactly 1
-    // Never auto-pick for other players - they will pick themselves
+    // Record pick and advance draft by exactly 1
     setPicks(p => ({ ...p, [teamName]: user.id }))
-    await supabase.from('picks').insert({ league_id: id, user_id: user.id, team_name: teamName })
-    await supabase.from('leagues').update({ draft_pos: league.draft_pos + 1 }).eq('id', id)
+    const { error } = await supabase.from('picks').insert({ league_id: id, user_id: user.id, team_name: teamName })
+    if (error) return // pick already taken, bail out
+    await supabase.from('leagues').update({ draft_pos: freshLeague.draft_pos + 1 }).eq('id', id)
     setTimeLeft(PICK_TIMER)
   }
 
