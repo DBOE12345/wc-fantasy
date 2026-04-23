@@ -78,10 +78,14 @@ export default function LeaguePage() {
     return () => supabase.removeChannel(channel)
   }, [load, id])
 
-  // 60 second pick timer
+  // 60 second pick timer - only runs when it is MY turn
   useEffect(() => {
-    if (!draftStarted) return
     if (timerRef.current) clearInterval(timerRef.current)
+    if (!draftStarted) return
+    const order = snakeOrder(league?.size || 4, 48)
+    const currentTurn = order[league?.draft_pos || 0]
+    const isMyTurnNow = currentTurn === mySlot
+    if (!isMyTurnNow) { setTimeLeft(PICK_TIMER); return }
     setTimeLeft(PICK_TIMER)
     timerRef.current = setInterval(() => {
       setTimeLeft(t => {
@@ -94,7 +98,7 @@ export default function LeaguePage() {
       })
     }, 1000)
     return () => clearInterval(timerRef.current)
-  }, [league?.draft_pos, draftStarted])
+  }, [league?.draft_pos, draftStarted, mySlot])
 
   async function handleAutoPickTimeout() {
     if (!league) return
