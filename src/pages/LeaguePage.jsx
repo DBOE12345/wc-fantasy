@@ -521,4 +521,4 @@ if (isAuto && currentTurn !== mySlot) return // auto-pick only fires for current
       </div>
     </div>
   )
-
+}
