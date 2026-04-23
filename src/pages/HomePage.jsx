@@ -76,16 +76,22 @@ export default function HomePage() {
         .single()
       if (existing) { navigate(`/league/${league.id}`); return }
 
-      // Check if league is full
-      const { count } = await supabase
+      // Get all existing members to find taken slots and check if full
+      const { data: existingMembers } = await supabase
         .from('league_members')
-        .select('id', { count: 'exact' })
+        .select('draft_slot')
         .eq('league_id', league.id)
-      if (count >= league.size) throw new Error('This league is full.')
+      const memberCount = existingMembers?.length || 0
+      if (memberCount >= league.size) throw new Error('This league is full.')
+
+      // Find the next available slot (not already taken)
+      const takenSlots = new Set(existingMembers?.map(m => m.draft_slot) || [])
+      let nextSlot = 0
+      while (takenSlots.has(nextSlot)) nextSlot++
 
       const { error: me } = await supabase
         .from('league_members')
-        .insert({ league_id: league.id, user_id: user.id, draft_slot: count, pts: 0 })
+        .insert({ league_id: league.id, user_id: user.id, draft_slot: nextSlot, pts: 0 })
       if (me) throw me
 
       navigate(`/league/${league.id}`)
