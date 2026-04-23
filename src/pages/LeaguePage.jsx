@@ -96,10 +96,6 @@ export default function LeaguePage() {
     return () => clearInterval(timerRef.current)
   }, [league?.draft_pos, draftStarted])
 
-  function isRealSlot(slotIndex) {
-    return members.some(m => m.draft_slot === slotIndex)
-  }
-
   async function handleAutoPickTimeout() {
     if (!league) return
     const order = snakeOrder(league.size, 48)
@@ -121,27 +117,11 @@ export default function LeaguePage() {
     const myPickCount = Object.entries(picks).filter(([, uid]) => uid === user.id).length
     if (myPickCount >= tpp) return
 
-    const newPickMap = { ...picks, [teamName]: user.id }
-    setPicks(newPickMap)
+    // Just record this pick and advance by exactly 1
+    // Never auto-pick for other players - they will pick themselves
+    setPicks(p => ({ ...p, [teamName]: user.id }))
     await supabase.from('picks').insert({ league_id: id, user_id: user.id, team_name: teamName })
-
-    let newPos = league.draft_pos + 1
-
-    // Only auto-skip EMPTY slots (no real player joined)
-    // Real players wait their full 60 seconds
-    while (newPos < order.length && Object.keys(newPickMap).length < 48) {
-      const nextSlot = order[newPos]
-      if (isRealSlot(nextSlot)) break
-      const available = TEAMS.filter(t => !newPickMap[t.n])
-      if (!available.length) break
-      const auto = available[Math.floor(Math.random() * Math.min(available.length, 8))]
-      newPickMap[auto.n] = `bot_${nextSlot}`
-      await supabase.from('picks').insert({ league_id: id, user_id: user.id, team_name: auto.n })
-      newPos++
-    }
-
-    setPicks({ ...newPickMap })
-    await supabase.from('leagues').update({ draft_pos: newPos }).eq('id', id)
+    await supabase.from('leagues').update({ draft_pos: league.draft_pos + 1 }).eq('id', id)
     setTimeLeft(PICK_TIMER)
   }
 
