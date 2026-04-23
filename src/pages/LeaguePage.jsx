@@ -56,15 +56,27 @@ export default function LeaguePage() {
     setDraftStarted(!!lg.draft_started)
     if (lg.scheduled_at) setScheduledTime(lg.scheduled_at.slice(0, 16))
 
-    const { data: mems } = await supabase
+    // Fetch members without profiles join first (more reliable)
+    const { data: mems, error: memsError } = await supabase
       .from('league_members')
-      .select('*, profiles(username, email)')
+      .select('*')
       .eq('league_id', id)
       .order('draft_slot')
-    setMembers(mems || [])
-
-    const me = mems?.find(m => m.user_id === user.id)
-    setMySlot(me?.draft_slot ?? 0)
+    
+    if (memsError) console.error('Members error:', memsError)
+    
+    // Try to get profiles separately
+    const memsWithProfiles = await Promise.all((mems || []).map(async m => {
+      const { data: profile } = await supabase
+        .from('profiles').select('username, email').eq('id', m.user_id).single()
+      return { ...m, profiles: profile || null }
+    }))
+    
+    setMembers(memsWithProfiles)
+    const me = memsWithProfiles.find(m => m.user_id === user.id)
+    const myDraftSlot = me?.draft_slot ?? null
+    if (myDraftSlot !== null) setMySlot(myDraftSlot)
+    console.log('My slot:', myDraftSlot, 'All members:', memsWithProfiles.map(m => ({ slot: m.draft_slot, uid: m.user_id.slice(0,8) })))
 
     const { data: pickData } = await supabase
       .from('picks').select('team_name, user_id').eq('league_id', id)
