@@ -17,6 +17,18 @@ const STAGE_CSS = {
 }
 const PICK_TIMER = 60
 
+// Determine whose turn it is given draft position and league size
+function getTurn(draftPos, leagueSize) {
+  const order = []
+  const tpp = 48 / leagueSize
+  for (let round = 0; round < tpp; round++) {
+    const players = [...Array(leagueSize).keys()]
+    if (round % 2 === 1) players.reverse()
+    players.forEach(i => order.push(i))
+  }
+  return order[draftPos] ?? null
+}
+
 export default function LeaguePage() {
   const { id } = useParams()
   const { user } = useAuth()
@@ -78,64 +90,71 @@ export default function LeaguePage() {
     return () => supabase.removeChannel(channel)
   }, [load, id])
 
-  // 60 second pick timer - only runs when it is MY turn
+  // Timer - only counts down when it's MY turn
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current)
-    if (!draftStarted) return
-    const order = snakeOrder(league?.size || 4, 48)
-    const currentTurn = order[league?.draft_pos || 0]
-    const isMyTurnNow = currentTurn === mySlot
-    if (!isMyTurnNow) { setTimeLeft(PICK_TIMER); return }
+    const draftPos = league?.draft_pos || 0
+    const leagueSize = league?.size || 4
+    const whoseTurn = getTurn(draftPos, leagueSize)
+    const draftDoneNow = draftPos >= (48 / leagueSize) * leagueSize || Object.keys(picks).length >= 48
+    const isMyTurnNow = draftStarted && !draftDoneNow && whoseTurn === mySlot
+    if (!isMyTurnNow) {
+      setTimeLeft(PICK_TIMER)
+      return
+    }
     setTimeLeft(PICK_TIMER)
     timerRef.current = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
           clearInterval(timerRef.current)
-          handleAutoPickTimeout()
+          // Auto pick for me since time ran out
+          const available = TEAMS.filter(t => !picks[t.n])
+          if (available.length > 0) {
+            const auto = available[Math.floor(Math.random() * Math.min(available.length, 5))]
+            makePick(auto.n, true)
+          }
           return PICK_TIMER
         }
-        return t - 1
+        return prev - 1
       })
     }, 1000)
     return () => clearInterval(timerRef.current)
-  }, [league?.draft_pos, draftStarted, mySlot])
-
-  async function handleAutoPickTimeout() {
-    if (!league) return
-    const order = snakeOrder(league.size, 48)
-    const currentTurn = order[league.draft_pos]
-    if (currentTurn !== mySlot) return
-    const available = TEAMS.filter(t => !picks[t.n])
-    if (!available.length) return
-    const autoPick = available[Math.floor(Math.random() * Math.min(available.length, 5))]
-    await makePick(autoPick.n, true)
-  }
+  }, [league?.draft_pos, draftStarted, mySlot, league?.size])
 
   async function makePick(teamName, isAuto = false) {
-    if (!league || !draftStarted) return
+    if (!draftStarted) return
 
-    // Get the FRESH draft_pos from DB to avoid stale state
+    // Always fetch fresh state from DB before making a pick
     const { data: freshLeague } = await supabase
-      .from('leagues').select('draft_pos,size').eq('id', id).single()
-    if (!freshLeague) return
+      .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
+    if (!freshLeague || !freshLeague.draft_started) return
 
     const tpp = 48 / freshLeague.size
-    const order = snakeOrder(freshLeague.size, 48)
-    const currentTurn = order[freshLeague.draft_pos]
+    const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
 
-    // Verify it is actually this player's turn
-    if (currentTurn !== mySlot) return
-    if (picks[teamName]) return
+    // Only allow picking if it's this player's turn
+    if (whoseTurn !== mySlot) return
 
-    const myPickCount = Object.entries(picks).filter(([, uid]) => uid === user.id).length
-    if (myPickCount >= tpp) return
+    // Check team not already picked
+    const { data: existingPick } = await supabase
+      .from('picks').select('id').eq('league_id', id).eq('team_name', teamName).single()
+    if (existingPick) return
 
-    // Record pick and advance draft by exactly 1
-    setPicks(p => ({ ...p, [teamName]: user.id }))
-    const { error } = await supabase.from('picks').insert({ league_id: id, user_id: user.id, team_name: teamName })
-    if (error) return // pick already taken, bail out
-    await supabase.from('leagues').update({ draft_pos: freshLeague.draft_pos + 1 }).eq('id', id)
-    setTimeLeft(PICK_TIMER)
+    // Check player hasn't exceeded their allotment
+    const { count: myCount } = await supabase
+      .from('picks').select('id', { count: 'exact' }).eq('league_id', id).eq('user_id', user.id)
+    if ((myCount || 0) >= tpp) return
+
+    // Insert pick
+    const { error } = await supabase.from('picks').insert({
+      league_id: id, user_id: user.id, team_name: teamName
+    })
+    if (error) return
+
+    // Advance draft position by exactly 1
+    await supabase.from('leagues').update({
+      draft_pos: freshLeague.draft_pos + 1
+    }).eq('id', id)
   }
 
   async function startDraft() {
