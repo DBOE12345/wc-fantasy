@@ -96,10 +96,8 @@ export default function LeaguePage() {
     return () => clearInterval(timerRef.current)
   }, [league?.draft_pos, draftStarted])
 
-function isRealSlot(slotIndex) {
-  if (!members || members.length === 0) return true // if members not loaded, assume real
-  return members.some(m => m.draft_slot === slotIndex)
-}
+  function isRealSlot(slotIndex) {
+    return members.some(m => m.draft_slot === slotIndex)
   }
 
   async function handleAutoPickTimeout() {
@@ -119,7 +117,6 @@ function isRealSlot(slotIndex) {
     const order = snakeOrder(league.size, 48)
     const currentTurn = order[league.draft_pos]
     if (!isAuto && currentTurn !== mySlot) return
-if (isAuto && currentTurn !== mySlot) return // auto-pick only fires for current player's slot
     if (picks[teamName]) return
     const myPickCount = Object.entries(picks).filter(([, uid]) => uid === user.id).length
     if (myPickCount >= tpp) return
