@@ -48,6 +48,7 @@ export default function LeaguePage() {
   const [scheduledTime, setScheduledTime] = useState('')
   const [savingSchedule, setSavingSchedule] = useState(false)
   const timerRef = useRef(null)
+  const pickingRef = useRef(false) // prevents double picks
 
   const load = useCallback(async () => {
     const { data: lg } = await supabase.from('leagues').select('*').eq('id', id).single()
@@ -119,12 +120,26 @@ export default function LeaguePage() {
       setTimeLeft(prev => {
         if (prev <= 1) {
           clearInterval(timerRef.current)
-          // Auto pick for me since time ran out
-          const available = TEAMS.filter(t => !picks[t.n])
-          if (available.length > 0) {
-            const auto = available[Math.floor(Math.random() * Math.min(available.length, 5))]
-            makePick(auto.n, true)
-          }
+          // Time ran out - auto pick a random available team for me
+          setTimeout(async () => {
+            const { data: freshLeague } = await supabase
+              .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
+            if (!freshLeague?.draft_started) return
+            const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
+            if (whoseTurn !== mySlot) return
+            const { data: existingPicks } = await supabase
+              .from('picks').select('team_name').eq('league_id', id)
+            const takenNames = new Set(existingPicks?.map(p => p.team_name) || [])
+            const available = TEAMS.filter(t => !takenNames.has(t.n))
+            if (!available.length) return
+            const auto = available[Math.floor(Math.random() * available.length)]
+            const tpp = 48 / freshLeague.size
+            const { count: myCount } = await supabase
+              .from('picks').select('id', { count: 'exact' }).eq('league_id', id).eq('user_id', user.id)
+            if ((myCount || 0) >= tpp) return
+            await supabase.from('picks').insert({ league_id: id, user_id: user.id, team_name: auto.n })
+            await supabase.from('leagues').update({ draft_pos: freshLeague.draft_pos + 1 }).eq('id', id)
+          }, 100)
           return PICK_TIMER
         }
         return prev - 1
@@ -135,6 +150,8 @@ export default function LeaguePage() {
 
   async function makePick(teamName, isAuto = false) {
     if (!draftStarted) return
+    if (pickingRef.current) return // already picking, prevent double pick
+    pickingRef.current = true
 
     // Always fetch fresh state from DB before making a pick
     const { data: freshLeague } = await supabase
@@ -157,16 +174,20 @@ export default function LeaguePage() {
       .from('picks').select('id', { count: 'exact' }).eq('league_id', id).eq('user_id', user.id)
     if ((myCount || 0) >= tpp) return
 
-    // Insert pick
-    const { error } = await supabase.from('picks').insert({
-      league_id: id, user_id: user.id, team_name: teamName
-    })
-    if (error) return
+    try {
+      // Insert pick
+      const { error } = await supabase.from('picks').insert({
+        league_id: id, user_id: user.id, team_name: teamName
+      })
+      if (error) return
 
-    // Advance draft position by exactly 1
-    await supabase.from('leagues').update({
-      draft_pos: freshLeague.draft_pos + 1
-    }).eq('id', id)
+      // Advance draft position by exactly 1
+      await supabase.from('leagues').update({
+        draft_pos: freshLeague.draft_pos + 1
+      }).eq('id', id)
+    } finally {
+      pickingRef.current = false
+    }
   }
 
   async function startDraft() {
@@ -327,19 +348,39 @@ export default function LeaguePage() {
               </div>
             ) : draftDone ? (
               <div style={{ background: 'rgba(29,158,117,.1)', border: '1px solid rgba(29,158,117,.3)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', fontSize: 14, color: '#5DCAA5', fontWeight: 500 }}>
-                ✅ Draft complete — all 48 teams assigned!
+                ✅ Draft complete — all teams assigned!
               </div>
             ) : (
               <div className="turn-banner" style={{ justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div className="turn-dot" />
                   <div className="turn-text">
-                    {isMyTurn ? `Your pick — ${myPicks.length + 1} of ${tpp}` : `Waiting for ${getDisplayName(members[currentTurn])}...`}
+                    {isMyTurn
+                      ? `Your pick — ${myPicks.length + 1} of ${tpp}`
+                      : `${getDisplayName(members.find(m => m.draft_slot === currentTurn))}'s pick`}
                   </div>
                 </div>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 700, color: timerColor }}>{timeLeft}s</div>
               </div>
             )}
+
+            {/* Last pick made */}
+            {draftStarted && Object.keys(picks).length > 0 && (() => {
+              const allPicksList = Object.entries(picks)
+              const lastEntry = allPicksList[allPicksList.length - 1]
+              if (!lastEntry) return null
+              const [lastTeam, lastUid] = lastEntry
+              const lastMember = members.find(m => m.user_id === lastUid)
+              const lastTeamData = TEAM_MAP[lastTeam]
+              return (
+                <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', marginBottom: 12, fontSize: 13, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>Last pick:</span>
+                  <Flag team={lastTeam} size={14} />
+                  <span style={{ color: 'var(--text)', fontWeight: 500 }}>{lastTeam}</span>
+                  <span>by <strong>{getDisplayName(lastMember)}</strong></span>
+                </div>
+              )
+            })()}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text3)', marginBottom: 6 }}>
               <span>Draft progress</span><span>{Object.keys(picks).length} / 48</span>
@@ -347,6 +388,42 @@ export default function LeaguePage() {
             <div className="prog-wrap">
               <div className="prog-fill" style={{ width: `${Math.round(Object.keys(picks).length / 48 * 100)}%` }} />
             </div>
+
+            {/* All players' current picks */}
+            {draftStarted && members.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div className="card-title">All players' picks</div>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(members.length, 2)}, 1fr)`, gap: 8 }}>
+                  {members.map(m => {
+                    const mPicks = Object.entries(picks).filter(([, uid]) => uid === m.user_id).map(([t]) => t)
+                    const isCurrentPicker = m.draft_slot === currentTurn && !draftDone
+                    return (
+                      <div key={m.id} style={{ background: isCurrentPicker ? 'rgba(29,158,117,.08)' : 'var(--bg3)', border: `1px solid ${isCurrentPicker ? 'rgba(29,158,117,.4)' : 'var(--border)'}`, borderRadius: 8, padding: '10px 12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                          <div className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: AV_BG[m.draft_slot % 8], color: AV_FG[m.draft_slot % 8], flexShrink: 0 }}>
+                            {getDisplayName(m).slice(0, 2).toUpperCase()}
+                          </div>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: isCurrentPicker ? '#5DCAA5' : 'var(--text)' }}>
+                            {getDisplayName(m)} {m.user_id === user.id && '(you)'}
+                          </span>
+                          {isCurrentPicker && <span style={{ fontSize: 10, color: '#5DCAA5', marginLeft: 'auto' }}>picking...</span>}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                          {mPicks.length === 0
+                            ? <span style={{ fontSize: 11, color: 'var(--text3)' }}>No picks yet</span>
+                            : mPicks.map(t => (
+                              <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg2)', borderRadius: 4, padding: '2px 5px' }}>
+                                <Flag team={t} size={12} />
+                                <span style={{ fontSize: 10, color: 'var(--text2)' }}>{t}</span>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="card-title" style={{ marginBottom: 10 }}>All 48 teams — tap to pick</div>
             {['A','B','C','D','E','F','G','H','I','J','K','L'].map(group => (
@@ -359,10 +436,16 @@ export default function LeaguePage() {
                     const owner = picks[t.n]
                     const isMine = owner === user.id
                     const isTaken = owner && !isMine
+                    const ownerMember = isTaken ? members.find(m => m.user_id === owner) : null
                     const canPick = draftStarted && isMyTurn && !draftDone && !isTaken && !isMine
                     return (
                       <div key={t.n} className={`team-card ${isMine ? 'mine' : ''} ${isTaken ? 'taken' : ''}`} onClick={() => canPick && makePick(t.n)} style={{ cursor: canPick ? 'pointer' : isTaken ? 'not-allowed' : 'default' }}>
                         {isMine && <div className="pick-check">✓</div>}
+                        {isTaken && ownerMember && (
+                          <div style={{ position: 'absolute', top: 4, right: 4, width: 15, height: 15, borderRadius: '50%', background: AV_BG[ownerMember.draft_slot % 8], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, fontWeight: 700, color: AV_FG[ownerMember.draft_slot % 8] }}>
+                            {getDisplayName(ownerMember).slice(0,1)}
+                          </div>
+                        )}
                         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 5 }}><Flag team={t.n} size={22} /></div>
                         <div className="tname">{t.n}</div>
                       </div>
@@ -375,7 +458,7 @@ export default function LeaguePage() {
             <div className="card-title">Draft order</div>
             {order.slice(Math.max(0, draftPos - 1), Math.min(order.length, draftPos + (league?.size || 4) + 2)).map((pi, i) => {
               const absPos = Math.max(0, draftPos - 1) + i
-              const m = members[pi]
+              const m = members.find(mem => mem.draft_slot === pi)
               const isCur = absPos === draftPos && !draftDone && draftStarted
               return (
                 <div key={absPos} className={`order-row ${isCur ? 'current' : ''}`}>
