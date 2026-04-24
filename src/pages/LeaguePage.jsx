@@ -123,7 +123,12 @@ export default function LeaguePage() {
   const [draftStarted, setDraftStarted] = useState(false)
   const [picksOrdered, setPicksOrdered] = useState([])
   const [draftComplete, setDraftComplete] = useState(false)
-  const [selectedPlayer, setSelectedPlayer] = useState(null) // for player detail modal
+  const [selectedPlayer, setSelectedPlayer] = useState(null)
+  const [chatMessages, setChatMessages] = useState([])
+  const [chatInput, setChatInput] = useState('')
+  const [sendingChat, setSendingChat] = useState(false)
+  const [countdown, setCountdown] = useState(null)
+  const chatEndRef = useRef(null)
   const [scheduledTime, setScheduledTime] = useState('')
   const [savingSchedule, setSavingSchedule] = useState(false)
   const timerRef = useRef(null)
@@ -171,17 +176,67 @@ export default function LeaguePage() {
       setBracket(b)
       await supabase.from('leagues').update({ bracket_data: JSON.stringify(b) }).eq('id', id)
     }
+    // Load chat messages
+    const { data: msgs } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('league_id', id)
+      .order('created_at')
+      .limit(50)
+    setChatMessages(msgs || [])
+
     setLoading(false)
   }, [id, user.id, navigate])
 
   useEffect(() => {
     load()
     const channel = supabase.channel(`league_${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, () => { load(); setTimeLeft(PICK_TIMER) })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leagues', filter: `id=eq.${id}` }, () => load())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, (payload) => {
+        // Just update picks locally instead of full reload
+        const newPick = payload.new
+        if (newPick) {
+          setPicks(prev => ({ ...prev, [newPick.team_name]: newPick.user_id }))
+          setPicksOrdered(prev => [...prev, newPick])
+          setTimeLeft(PICK_TIMER)
+        }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}` }, (payload) => {
+        const updated = payload.new
+        if (updated) {
+          setLeague(updated)
+          setDraftStarted(!!updated.draft_started)
+          if (updated.bracket_data) {
+            try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+          }
+        }
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}` }, (payload) => {
+        if (payload.new) setChatMessages(prev => [...prev, payload.new])
+      })
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [load, id])
+
+  // Draft countdown timer
+  useEffect(() => {
+    if (!league?.scheduled_at || draftStarted) { setCountdown(null); return }
+    const tick = () => {
+      const diff = new Date(league.scheduled_at) - new Date()
+      if (diff <= 0) { setCountdown('Starting now!'); return }
+      const h = Math.floor(diff / 3600000)
+      const m = Math.floor((diff % 3600000) / 60000)
+      const s = Math.floor((diff % 60000) / 1000)
+      setCountdown(h > 0 ? `${h}h ${m}m ${s}s` : m > 0 ? `${m}m ${s}s` : `${s}s`)
+    }
+    tick()
+    const t = setInterval(tick, 1000)
+    return () => clearInterval(t)
+  }, [league?.scheduled_at, draftStarted])
+
+  // Scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages])
 
   // Timer - only counts down when it's MY turn
   useEffect(() => {
@@ -195,6 +250,8 @@ export default function LeaguePage() {
       setTimeLeft(PICK_TIMER)
       return
     }
+    // Send notification that it's my turn
+    sendPickNotification()
     setTimeLeft(PICK_TIMER)
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
@@ -244,10 +301,10 @@ export default function LeaguePage() {
     // Only allow picking if it's this player's turn
     if (whoseTurn !== mySlot) return
 
-    // Check team not already picked
-    const { data: existingPick } = await supabase
-      .from('picks').select('id').eq('league_id', id).eq('team_name', teamName).single()
-    if (existingPick) return
+    // Check team not already picked (use count, not single() which throws 406 on no rows)
+    const { count: existingCount } = await supabase
+      .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('team_name', teamName)
+    if (existingCount && existingCount > 0) return
 
     // Check player hasn't exceeded their allotment
     const { count: myCount } = await supabase
@@ -278,11 +335,24 @@ export default function LeaguePage() {
   }
 
   async function startDraft() {
-    getAudioCtx() // initialize audio on user gesture
-    // Clear old bracket so it regenerates fresh after this draft
+    getAudioCtx()
+    // Request notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission()
+    }
     await supabase.from('leagues').update({ draft_started: true, bracket_data: null }).eq('id', id)
     setDraftStarted(true)
     setTimeout(() => playSound('draft_start'), 100)
+  }
+
+  function sendPickNotification(playerName) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('⚽ Your turn to pick!', {
+        body: `It's your pick in ${league?.name}. You have 60 seconds!`,
+        icon: '/favicon.ico',
+        tag: 'draft-pick'
+      })
+    }
   }
 
   async function saveSchedule() {
@@ -293,6 +363,21 @@ export default function LeaguePage() {
     alert('Draft time saved!')
   }
 
+  async function sendChat() {
+    if (!chatInput.trim() || sendingChat) return
+    setSendingChat(true)
+    const me = members.find(m => m.user_id === user.id)
+    const name = me?.profiles?.username || me?.profiles?.email?.split('@')[0] || 'Player'
+    await supabase.from('chat_messages').insert({
+      league_id: id,
+      user_id: user.id,
+      username: name,
+      message: chatInput.trim()
+    })
+    setChatInput('')
+    setSendingChat(false)
+  }
+
   function copyCode() {
     navigator.clipboard.writeText(league?.code || '')
     setCopied(true)
@@ -301,7 +386,10 @@ export default function LeaguePage() {
 
   function getDisplayName(m) {
     if (!m) return 'TBD'
-    return m.profiles?.username || m.profiles?.email?.split('@')[0] || `Player ${(m.draft_slot ?? 0) + 1}`
+    // Try username first, then email prefix, then generic player number
+    const name = m.profiles?.username || m.profiles?.email?.split('@')[0]
+    if (name && name.length > 2) return name
+    return `Player ${(m.draft_slot ?? 0) + 1}`
   }
 
   function computePoints() {
@@ -339,7 +427,7 @@ export default function LeaguePage() {
   const timerColor = timeLeft > 30 ? '#5DCAA5' : timeLeft > 10 ? '#FAC775' : '#F09595'
 
   return (
-    <div>
+    <div onClick={() => { try { getAudioCtx() } catch(e) {} }}>
       {/* Draft Complete Popup */}
       {draftComplete && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
@@ -363,8 +451,8 @@ export default function LeaguePage() {
       )}
       {/* Player Detail Modal */}
       {selectedPlayer && (() => {
-        // Get fresh data from rankedMembers in case points updated
-        const p = rankedMembers.find(m => m.user_id === selectedPlayer.user_id) || selectedPlayer
+        // Get fresh data from rankedMembers
+        const p = rankedMembers.find(m => m.id === selectedPlayer.id) || selectedPlayer
         const stageBonus = bracket?.stageBonus || {}
         const STAGE_CSS_MAP = {
           'Champion':'stage-ch','Runner-up':'stage-ru','Semi-final':'stage-sf',
@@ -442,6 +530,9 @@ export default function LeaguePage() {
           <button className={`tab ${tab==='myteams'?'active':''}`} onClick={() => setTab('myteams')}>My Teams</button>
           <button className={`tab ${tab==='bracket'?'active':''}`} onClick={() => setTab('bracket')}>Bracket</button>
           <button className={`tab ${tab==='scoring'?'active':''}`} onClick={() => setTab('scoring')}>Scoring</button>
+          <button className={`tab ${tab==='chat'?'active':''}`} onClick={() => setTab('chat')}>
+            Chat {chatMessages.length > 0 && <span style={{marginLeft:4,background:'var(--green)',borderRadius:'50%',width:7,height:7,display:'inline-block'}}/>}
+          </button>
         </div>
 
         {/* LEAGUE TAB */}
@@ -466,6 +557,13 @@ export default function LeaguePage() {
               </div>
               <p style={{ fontSize: 12, color: 'var(--text3)' }}>Share this code with friends to join your league</p>
             </div>
+
+            {countdown && (
+              <div style={{ background: 'rgba(239,159,39,.1)', border: '1px solid rgba(239,159,39,.3)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: 14, color: '#FAC775', fontWeight: 500 }}>⏰ Draft starts in</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 20, fontWeight: 700, color: '#FAC775' }}>{countdown}</div>
+              </div>
+            )}
 
             <div className="card" style={{ marginBottom: '1.5rem' }}>
               <div className="card-title">Draft schedule</div>
@@ -766,6 +864,62 @@ export default function LeaguePage() {
                 </div>
               </div>
             )}
+          </>
+        )}
+
+        {/* CHAT TAB */}
+        {tab === 'chat' && (
+          <>
+            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>League Chat</h2>
+            <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: '1.5rem' }}>Talk trash, celebrate picks, and hype each other up</p>
+            <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, display: 'flex', flexDirection: 'column', height: 400 }}>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {chatMessages.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: 'var(--text3)', fontSize: 14, margin: 'auto' }}>
+                    No messages yet. Say something! 👋
+                  </div>
+                ) : (
+                  chatMessages.map((msg, i) => {
+                    const isMe = msg.user_id === user.id
+                    return (
+                      <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 3 }}>{msg.username}</div>
+                        <div style={{
+                          background: isMe ? 'rgba(29,158,117,.2)' : 'var(--bg3)',
+                          border: `1px solid ${isMe ? 'rgba(29,158,117,.3)' : 'var(--border)'}`,
+                          borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                          padding: '8px 12px',
+                          fontSize: 14,
+                          color: 'var(--text)',
+                          maxWidth: '75%',
+                          wordBreak: 'break-word'
+                        }}>
+                          {msg.message}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 3 }}>
+                          {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+                <div ref={chatEndRef} />
+              </div>
+              <div style={{ padding: '12px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
+                <input
+                  className="input"
+                  type="text"
+                  placeholder="Say something..."
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && sendChat()}
+                  style={{ flex: 1 }}
+                />
+                <button className="btn btn-primary" onClick={sendChat} disabled={sendingChat || !chatInput.trim()}>
+                  Send
+                </button>
+              </div>
+            </div>
           </>
         )}
 
