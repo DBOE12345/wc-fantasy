@@ -109,7 +109,7 @@ export default function HomePage() {
         <div className="header-inner">
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             <button className="btn btn-ghost" onClick={() => navigate('/')} style={{padding:'6px 8px',fontSize:18}}>←</button>
-            <DubUpLogoHorizontal height={34} />
+            <DubUpLogoHorizontal height={44} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 13, color: 'var(--text2)' }}>{user?.email}</span>

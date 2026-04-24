@@ -31,25 +31,31 @@ function playSound(type) {
     const ctx = getAudioCtx()
 
     if (type === 'draft_start') {
-      // Soccer referee whistle - two short blasts
-      function refWhistle(startTime, dur) {
-        // Main tone ~800Hz with harmonics for pea-whistle sound
-        [800, 1600, 2400].forEach((freq, hi) => {
-          const osc = ctx.createOscillator()
-          const gain = ctx.createGain()
-          osc.connect(gain); gain.connect(ctx.destination)
-          osc.type = 'square'
-          osc.frequency.value = freq
-          const vol = hi === 0 ? 0.18 : hi === 1 ? 0.06 : 0.03
-          gain.gain.setValueAtTime(0, startTime)
-          gain.gain.linearRampToValueAtTime(vol, startTime + 0.02)
-          gain.gain.setValueAtTime(vol, startTime + dur - 0.05)
-          gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur)
-          osc.start(startTime); osc.stop(startTime + dur)
-        })
-      }
-      refWhistle(ctx.currentTime, 0.35)
-      refWhistle(ctx.currentTime + 0.5, 0.5)
+      // Stadium horn + crowd build up
+      const hornNotes = [220, 277, 330, 440]
+      hornNotes.forEach((freq, i) => {
+        const t = ctx.currentTime + i * 0.15
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(ctx.destination)
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(freq, t)
+        osc.frequency.linearRampToValueAtTime(freq * 1.02, t + 0.4)
+        gain.gain.setValueAtTime(0, t)
+        gain.gain.linearRampToValueAtTime(0.22, t + 0.04)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5)
+        osc.start(t); osc.stop(t + 0.5)
+        // Add harmonic overtone
+        const osc2 = ctx.createOscillator()
+        const gain2 = ctx.createGain()
+        osc2.connect(gain2); gain2.connect(ctx.destination)
+        osc2.type = 'triangle'
+        osc2.frequency.value = freq * 2
+        gain2.gain.setValueAtTime(0, t)
+        gain2.gain.linearRampToValueAtTime(0.06, t + 0.04)
+        gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.4)
+        osc2.start(t); osc2.stop(t + 0.4)
+      })
     }
 
     if (type === 'pick') {
@@ -73,25 +79,32 @@ function playSound(type) {
     }
 
     if (type === 'complete') {
-      // Three referee whistles = full time!
-      function refWhistle(startTime, dur) {
-        [800, 1600, 2400].forEach((freq, hi) => {
-          const osc = ctx.createOscillator()
-          const gain = ctx.createGain()
-          osc.connect(gain); gain.connect(ctx.destination)
-          osc.type = 'square'
-          osc.frequency.value = freq
-          const vol = hi === 0 ? 0.18 : hi === 1 ? 0.06 : 0.03
-          gain.gain.setValueAtTime(0, startTime)
-          gain.gain.linearRampToValueAtTime(vol, startTime + 0.02)
-          gain.gain.setValueAtTime(vol, startTime + dur - 0.04)
-          gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur)
-          osc.start(startTime); osc.stop(startTime + dur)
-        })
-      }
-      refWhistle(ctx.currentTime, 0.25)
-      refWhistle(ctx.currentTime + 0.4, 0.25)
-      refWhistle(ctx.currentTime + 0.8, 0.7)
+      // Victory chime sequence
+      const melody = [523, 659, 784, 1047, 784, 1047, 1319]
+      const durations = [0.15, 0.15, 0.15, 0.3, 0.1, 0.1, 0.5]
+      let t = ctx.currentTime
+      melody.forEach((freq, i) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(ctx.destination)
+        osc.type = 'sine'
+        osc.frequency.value = freq
+        gain.gain.setValueAtTime(0, t)
+        gain.gain.linearRampToValueAtTime(0.2, t + 0.02)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + durations[i])
+        osc.start(t); osc.stop(t + durations[i])
+        // Bell overtone
+        const osc2 = ctx.createOscillator()
+        const gain2 = ctx.createGain()
+        osc2.connect(gain2); gain2.connect(ctx.destination)
+        osc2.type = 'triangle'
+        osc2.frequency.value = freq * 3
+        gain2.gain.setValueAtTime(0, t)
+        gain2.gain.linearRampToValueAtTime(0.05, t + 0.01)
+        gain2.gain.exponentialRampToValueAtTime(0.001, t + durations[i] * 0.6)
+        osc2.start(t); osc2.stop(t + durations[i])
+        t += durations[i] * 0.85
+      })
     }
   } catch(e) {
     console.log('Sound not supported:', e)
@@ -260,7 +273,7 @@ export default function LeaguePage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
 
-  // Timer - only counts down when it's MY turn
+  // Timer - runs for everyone when draft is active, auto-picks when MY turn expires
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current)
     const draftPos = league?.draft_pos || 0
@@ -270,7 +283,7 @@ export default function LeaguePage() {
     const isMyTurnNow = draftStarted && !draftDoneNow && whoseTurn === mySlot
     // Always reset timer when turn changes
     setTimeLeft(PICK_TIMER)
-    // Only run countdown and notifications when it's my turn OR when draft is active (so everyone sees the clock)
+    // Run clock for everyone when draft is active so all players see it ticking
     if (!draftStarted || draftDoneNow) return
     // Send notification when it becomes my turn
     if (isMyTurnNow) sendPickNotification()
@@ -297,13 +310,27 @@ export default function LeaguePage() {
         }
         if (prev <= 1) {
           clearInterval(timerRef.current)
-          // Time ran out - auto pick a random available team for me
+          // Time ran out — auto pick for whoever's turn it is (works even if they're not on draft tab)
           setTimeout(async () => {
             const { data: freshLeague } = await supabase
               .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
             if (!freshLeague?.draft_started) return
             const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
-            if (whoseTurn !== mySlot) return
+            // Find the member whose turn it is
+            const { data: members2 } = await supabase
+              .from('league_members').select('user_id, draft_slot').eq('league_id', id)
+            const turnMember = members2?.find(m => m.draft_slot === whoseTurn)
+            // Only the first player alphabetically triggers auto-pick to avoid duplicates
+            // Use the logged-in user only if it's their slot, OR if no one else will do it (slot 0 always fires as fallback)
+            if (whoseTurn !== mySlot && mySlot !== 0) return
+            if (whoseTurn !== mySlot && mySlot === 0) {
+              // I'm slot 0 acting as fallback — only fire if the real owner hasn't picked
+              const { data: recentPick } = await supabase
+                .from('picks').select('picked_at').eq('league_id', id)
+                .order('picked_at', { ascending: false }).limit(1).single()
+              const lastPickTime = recentPick?.picked_at ? new Date(recentPick.picked_at) : null
+              if (lastPickTime && (new Date() - lastPickTime) < 58000) return // someone picked recently
+            }
             const { data: existingPicks } = await supabase
               .from('picks').select('team_name').eq('league_id', id)
             const takenNames = new Set(existingPicks?.map(p => p.team_name) || [])
@@ -311,11 +338,17 @@ export default function LeaguePage() {
             if (!available.length) return
             const auto = available[Math.floor(Math.random() * available.length)]
             const tpp = 48 / freshLeague.size
-            const { count: myCount } = await supabase
-              .from('picks').select('id', { count: 'exact' }).eq('league_id', id).eq('user_id', user.id)
-            if ((myCount || 0) >= tpp) return
-            await supabase.from('picks').insert({ league_id: id, user_id: user.id, team_name: auto.n })
-            await supabase.from('leagues').update({ draft_pos: freshLeague.draft_pos + 1 }).eq('id', id)
+            const pickUserId = turnMember?.user_id || user.id
+            const { count: theirCount } = await supabase
+              .from('picks').select('id', { count: 'exact', head: true })
+              .eq('league_id', id).eq('user_id', pickUserId)
+            if ((theirCount || 0) >= tpp) return
+            const { error } = await supabase.from('picks').insert({
+              league_id: id, user_id: pickUserId, team_name: auto.n
+            })
+            if (!error) {
+              await supabase.from('leagues').update({ draft_pos: freshLeague.draft_pos + 1 }).eq('id', id)
+            }
           }, 100)
           return PICK_TIMER
         }
@@ -560,7 +593,7 @@ export default function LeaguePage() {
         <div className="header-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className="btn btn-ghost" onClick={() => navigate('/')} style={{ padding: '6px 8px', fontSize: 18 }}>←</button>
-            <DubUpLogoHorizontal height={34} />
+            <DubUpLogoHorizontal height={44} />
             <span style={{ color: 'var(--text3)', fontSize: 13 }}>·</span>
             <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '.04em', fontFamily: 'var(--font-display)' }}>{league?.name}</span>
           </div>

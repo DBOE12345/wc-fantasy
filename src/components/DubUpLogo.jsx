@@ -2,45 +2,35 @@ import iconImg from '../assets/dubup-logo-icon.png'
 import stackedImg from '../assets/dubup-logo-stacked.png'
 import horizontalImg from '../assets/dubup-logo-horizontal.png'
 
-// Detects if image is JPEG (black bg) or PNG (transparent)
-// We use mix-blend-mode: screen to remove black backgrounds from JPEGs
-const blendStyle = { mixBlendMode: 'screen' }
-
-// Icon only - used in headers
+// Icon only - headers
 export default function DubUpLogo({ size = 40 }) {
   return (
-    <div style={{ width: size, height: size, flexShrink: 0, overflow: 'hidden' }}>
-      <img
-        src={iconImg}
-        alt="DubUp"
-        style={{ width: '100%', height: '100%', objectFit: 'contain', ...blendStyle }}
-      />
-    </div>
+    <img
+      src={iconImg}
+      alt="DubUp"
+      style={{ width: size, height: size, objectFit: 'contain', flexShrink: 0 }}
+    />
   )
 }
 
-// Stacked logo - welcome screen
-export function DubUpLogoLarge({ size = 180 }) {
+// Stacked - welcome screen
+export function DubUpLogoLarge({ size = 220 }) {
   return (
-    <div style={{ width: size, height: size, flexShrink: 0, overflow: 'hidden' }}>
-      <img
-        src={stackedImg}
-        alt="DubUp Fantasy"
-        style={{ width: '100%', height: '100%', objectFit: 'contain', ...blendStyle }}
-      />
-    </div>
+    <img
+      src={stackedImg}
+      alt="DubUp Fantasy"
+      style={{ width: size, height: size, objectFit: 'contain', flexShrink: 0 }}
+    />
   )
 }
 
 // Horizontal - nav headers
-export function DubUpLogoHorizontal({ height = 36 }) {
+export function DubUpLogoHorizontal({ height = 44 }) {
   return (
-    <div style={{ height: height, flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
-      <img
-        src={horizontalImg}
-        alt="DubUp Fantasy"
-        style={{ height: '100%', width: 'auto', objectFit: 'contain', ...blendStyle }}
-      />
-    </div>
+    <img
+      src={horizontalImg}
+      alt="DubUp Fantasy"
+      style={{ height: height, width: 'auto', objectFit: 'contain', flexShrink: 0, maxWidth: 200 }}
+    />
   )
 }
