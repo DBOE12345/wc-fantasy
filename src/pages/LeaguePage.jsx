@@ -469,7 +469,7 @@ export default function LeaguePage() {
                   {getDisplayName(p).slice(0, 2).toUpperCase()}
                 </div>
                 <div>
-                  <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>{getDisplayName(p)}</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: ".02em", color: 'var(--text)' }}>{getDisplayName(p)}</div>
                   <div style={{ fontSize: 13, color: 'var(--text2)' }}>{p.computedPts} pts total · {p.teamPicks.length} teams</div>
                 </div>
                 <button onClick={() => setSelectedPlayer(null)} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text2)', fontSize: 20, cursor: 'pointer' }}>×</button>
@@ -516,11 +516,11 @@ export default function LeaguePage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className="btn btn-ghost" onClick={() => navigate('/')} style={{ padding: '6px 8px', fontSize: 18 }}>←</button>
             <div className="logo">
-              <div className="logo-icon">⚽</div>
-              <span style={{ color: 'var(--green)' }}>Fantasy</span><span>Dub</span>
+              <div className="logo-icon">DU</div>
+              <span className="clay">DUBUP</span>
             </div>
             <span style={{ color: 'var(--text3)', fontSize: 13 }}>·</span>
-            <span style={{ fontSize: 13, color: 'var(--text2)', fontWeight: 500, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{league?.name}</span>
+            <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '.04em', fontFamily: 'var(--font-display)' }}>{league?.name}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text3)', letterSpacing: '.1em' }}>{league?.code}</span>
@@ -530,18 +530,7 @@ export default function LeaguePage() {
       </div>
 
       <div className="container page-wrap">
-        <div className="tabs">
-          <button className={`tab ${tab==='league'?'active':''}`} onClick={() => setTab('league')}>League</button>
-          <button className={`tab ${tab==='draft'?'active':''}`} onClick={() => setTab('draft')}>
-            Draft {draftStarted && !draftDone && isMyTurn && <span style={{ marginLeft: 5, width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', display: 'inline-block' }} />}
-          </button>
-          <button className={`tab ${tab==='myteams'?'active':''}`} onClick={() => setTab('myteams')}>My Teams</button>
-          <button className={`tab ${tab==='bracket'?'active':''}`} onClick={() => setTab('bracket')}>Bracket</button>
-          <button className={`tab ${tab==='scoring'?'active':''}`} onClick={() => setTab('scoring')}>Scoring</button>
-          <button className={`tab ${tab==='chat'?'active':''}`} onClick={() => setTab('chat')}>
-            Chat {chatMessages.length > 0 && <span style={{marginLeft:4,background:'var(--green)',borderRadius:'50%',width:7,height:7,display:'inline-block'}}/>}
-          </button>
-        </div>
+
 
         {/* LEAGUE TAB */}
         {tab === 'league' && (
@@ -729,7 +718,7 @@ export default function LeaguePage() {
                     return (
                       <div key={t.n} className={`team-card ${isMine ? 'mine' : ''} ${isAnyonePicked && !isMine ? 'taken' : ''}`} onClick={() => canPick && makePick(t.n)} style={{ cursor: canPick ? 'pointer' : isAnyonePicked ? 'not-allowed' : 'default' }}>
                         {isMine && <div className="pick-check">✓</div>}
-                        {isTaken && ownerMember && (
+                        {isTakenByOther && ownerMember && (
                           <div style={{ position: 'absolute', top: 4, right: 4, width: 15, height: 15, borderRadius: '50%', background: AV_BG[ownerMember.draft_slot % 8], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, fontWeight: 700, color: AV_FG[ownerMember.draft_slot % 8] }}>
                             {getDisplayName(ownerMember).slice(0,1)}
                           </div>
@@ -776,7 +765,7 @@ export default function LeaguePage() {
             <>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: 10 }}>
                 <div>
-                  <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>
+                  <h2 style={{ fontSize: 20, fontWeight: 900, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: ".02em", marginBottom: 4 }}>
                     {isViewingMe ? 'My Teams' : `${getDisplayName(displayMember)}'s Teams`}
                   </h2>
                   <p style={{ fontSize: 14, color: 'var(--text2)' }}>{displayPicks.length} of {tpp} teams · {displayMember?.computedPts || 0} pts</p>
@@ -854,7 +843,7 @@ export default function LeaguePage() {
         {/* BRACKET TAB */}
         {tab === 'bracket' && (
           <>
-            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Tournament Bracket</h2>
+            <h2 style={{ fontSize: 20, fontWeight: 900, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: ".02em", marginBottom: 4 }}>Tournament Bracket</h2>
             <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: '1.5rem' }}>Simulated — your teams are highlighted in green.</p>
             {!bracket ? (
               <div className="empty"><p>Bracket generates once the draft is complete.</p></div>
@@ -907,7 +896,7 @@ export default function LeaguePage() {
         {/* CHAT TAB */}
         {tab === 'chat' && (
           <>
-            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>League Chat</h2>
+            <h2 style={{ fontSize: 20, fontWeight: 900, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: ".02em", marginBottom: 4 }}>League Chat</h2>
             <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: '1.5rem' }}>Talk trash, celebrate picks, and hype each other up</p>
             <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, display: 'flex', flexDirection: 'column', height: 400 }}>
               <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -963,7 +952,7 @@ export default function LeaguePage() {
         {/* SCORING TAB */}
         {tab === 'scoring' && (
           <>
-            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Scoring Rules</h2>
+            <h2 style={{ fontSize: 20, fontWeight: 900, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: ".02em", marginBottom: 4 }}>Scoring Rules</h2>
             <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: '1.5rem' }}>Points tallied after every match</p>
             <div className="card" style={{ marginBottom: 12 }}>
               <div className="card-title">Match results</div>
@@ -994,6 +983,82 @@ export default function LeaguePage() {
             </div>
           </>
         )}
+      </div>
+      {/* Bottom Navigation */}
+      <div style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 100,
+        background: 'rgba(14,24,16,0.97)',
+        borderTop: '1px solid var(--border)',
+        backdropFilter: 'blur(16px)',
+        display: 'flex',
+        height: 64,
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+        {[
+          { id: 'league', label: 'League', icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--clay)' : 'var(--text3)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          )},
+          { id: 'draft', label: 'Draft', icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--clay)' : 'var(--text3)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+            </svg>
+          ), badge: draftStarted && !draftDone && isMyTurn },
+          { id: 'myteams', label: 'My Teams', icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--clay)' : 'var(--text3)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/>
+            </svg>
+          )},
+          { id: 'bracket', label: 'Bracket', icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--clay)' : 'var(--text3)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+          )},
+          { id: 'chat', label: 'Chat', icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--clay)' : 'var(--text3)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+            </svg>
+          ), badge: chatMessages.length > 0 && tab !== 'chat' },
+          { id: 'scoring', label: 'Rules', icon: (active) => (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--clay)' : 'var(--text3)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          )},
+        ].map(item => (
+          <button
+            key={item.id}
+            onClick={() => setTab(item.id)}
+            style={{
+              flex: 1,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              gap: 3,
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              position: 'relative',
+              padding: '8px 0',
+            }}
+          >
+            {item.badge && (
+              <div style={{ position: 'absolute', top: 6, right: '50%', transform: 'translateX(8px)', width: 8, height: 8, borderRadius: '50%', background: 'var(--clay)', boxShadow: '0 0 6px var(--clay)' }} />
+            )}
+            {item.icon(tab === item.id)}
+            <span style={{
+              fontSize: 9,
+              fontFamily: 'var(--font-display)',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '.06em',
+              color: tab === item.id ? 'var(--clay)' : 'var(--text3)',
+            }}>
+              {item.label}
+            </span>
+            {tab === item.id && (
+              <div style={{ position: 'absolute', top: 0, left: '15%', right: '15%', height: 2, background: 'var(--clay)', borderRadius: '0 0 2px 2px' }} />
+            )}
+          </button>
+        ))}
       </div>
     </div>
   )

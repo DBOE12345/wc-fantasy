@@ -106,7 +106,10 @@ export default function HomePage() {
     <div>
       <div className="app-header">
         <div className="header-inner">
-          <div className="logo"><div className="logo-icon">⚽</div><span style={{color:'var(--green)'}}>Fantasy</span>Dub</div>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <button className="btn btn-ghost" onClick={() => navigate('/')} style={{padding:'6px 8px',fontSize:18}}>←</button>
+            <div className="logo"><div className="logo-icon">DU</div><span className="clay">DUBUP</span></div>
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 13, color: 'var(--text2)' }}>{user?.email}</span>
             <button className="btn btn-ghost" onClick={signOut}>Sign out</button>
@@ -116,7 +119,7 @@ export default function HomePage() {
 
       <div className="container page-wrap">
         <div style={{ marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: 26, fontWeight: 600, marginBottom: 6 }}>My leagues</h1>
+          <h1 style={{ fontSize: 26, fontWeight: 900, marginBottom: 6, fontFamily: 'var(--font-display)', textTransform: 'uppercase', letterSpacing: '.02em' }}>My Leagues</h1>
           <p style={{ color: 'var(--text2)', fontSize: 14 }}>Create a new league or join one with an invite code</p>
         </div>
 
