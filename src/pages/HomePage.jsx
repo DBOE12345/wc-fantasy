@@ -106,7 +106,7 @@ export default function HomePage() {
     <div>
       <div className="app-header">
         <div className="header-inner">
-          <div className="logo"><div className="logo-dot" />WC Fantasy 2026</div>
+          <div className="logo"><div className="logo-icon">⚽</div><span style={{color:'var(--green)'}}>Fantasy</span>Dub</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 13, color: 'var(--text2)' }}>{user?.email}</span>
             <button className="btn btn-ghost" onClick={signOut}>Sign out</button>

@@ -124,6 +124,7 @@ export default function LeaguePage() {
   const [picksOrdered, setPicksOrdered] = useState([])
   const [draftComplete, setDraftComplete] = useState(false)
   const [selectedPlayer, setSelectedPlayer] = useState(null)
+  const [viewingPlayer, setViewingPlayer] = useState(null) // for My Teams dropdown
   const [chatMessages, setChatMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
   const [sendingChat, setSendingChat] = useState(false)
@@ -358,9 +359,11 @@ export default function LeaguePage() {
   async function saveSchedule() {
     if (!scheduledTime) return
     setSavingSchedule(true)
-    await supabase.from('leagues').update({ scheduled_at: scheduledTime }).eq('id', id)
+    // Convert local datetime to ISO string to preserve timezone
+    const localDate = new Date(scheduledTime)
+    await supabase.from('leagues').update({ scheduled_at: localDate.toISOString() }).eq('id', id)
     setSavingSchedule(false)
-    alert('Draft time saved!')
+    alert('Draft time saved! Shows as: ' + localDate.toLocaleString())
   }
 
   async function sendChat() {
@@ -510,9 +513,14 @@ export default function LeaguePage() {
 
       <div className="app-header">
         <div className="header-inner">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button className="btn btn-ghost" onClick={() => navigate('/')} style={{ padding: '6px 8px' }}>←</button>
-            <div className="logo"><div className="logo-dot" />{league?.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button className="btn btn-ghost" onClick={() => navigate('/')} style={{ padding: '6px 8px', fontSize: 18 }}>←</button>
+            <div className="logo">
+              <div className="logo-icon">⚽</div>
+              <span style={{ color: 'var(--green)' }}>Fantasy</span><span>Dub</span>
+            </div>
+            <span style={{ color: 'var(--text3)', fontSize: 13 }}>·</span>
+            <span style={{ fontSize: 13, color: 'var(--text2)', fontWeight: 500, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{league?.name}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text3)', letterSpacing: '.1em' }}>{league?.code}</span>
@@ -569,7 +577,7 @@ export default function LeaguePage() {
               <div className="card-title">Draft schedule</div>
               {league?.scheduled_at && (
                 <div style={{ marginBottom: 12, fontSize: 14, color: 'var(--text2)' }}>
-                  📅 Scheduled for: <strong style={{ color: 'var(--text)' }}>{new Date(league.scheduled_at).toLocaleString()}</strong>
+                  📅 Scheduled for: <strong style={{ color: 'var(--text)' }}>{new Date(league.scheduled_at).toLocaleString(undefined, {dateStyle:'medium',timeStyle:'short'})}</strong>
                 </div>
               )}
               {isCommissioner && !draftStarted && (
@@ -617,7 +625,8 @@ export default function LeaguePage() {
         )}
 
         {/* DRAFT TAB */}
-        {tab === 'draft' && (
+        {tab === 'draft' && (() => {
+          try { return (
           <>
             {!draftStarted ? (
               <div style={{ background: 'rgba(255,255,255,.05)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: '1.25rem', textAlign: 'center' }}>
@@ -637,7 +646,7 @@ export default function LeaguePage() {
                   <div className="turn-text">
                     {isMyTurn
                       ? `Your pick — ${myPicks.length + 1} of ${tpp}`
-                      : `${getDisplayName(members.find(m => m.draft_slot === currentTurn))}'s pick`}
+                      : `${getDisplayName(members.find(m => m.draft_slot === (currentTurn ?? -1)) || null)}'s pick`}
                   </div>
                 </div>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 700, color: timerColor }}>{timeLeft}s</div>
@@ -753,66 +762,94 @@ export default function LeaguePage() {
               )
             })}
           </>
-        )}
+          )} catch(e) { return <div className="card"><p style={{color:'var(--text2)',fontSize:14}}>Error loading draft: {e.message}</p></div> }
+        })()}
 
         {/* MY TEAMS TAB */}
-        {tab === 'myteams' && (
-          <>
-            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>My Teams</h2>
-            <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: '1.5rem' }}>{myPicks.length} of {tpp} teams drafted</p>
-            {myPicks.length === 0 ? (
-              <div className="empty"><div className="empty-icon">🏳️</div><p>No picks yet — head to Draft to start</p></div>
-            ) : (
-              <>
-                <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: '1.5rem', gap: 6 }}>
-                  {myPicks.map(n => (
-                    <div key={n} className="team-tag">
-                      <Flag team={n} size={16} />
-                      <span style={{ marginLeft: 4 }}>{n}</span>
-                    </div>
-                  ))}
+        {tab === 'myteams' && (() => {
+          const displayMember = viewingPlayer
+            ? rankedMembers.find(m => m.user_id === viewingPlayer) || rankedMembers[0]
+            : rankedMembers.find(m => m.user_id === user.id) || rankedMembers[0]
+          const displayPicks = displayMember?.teamPicks || []
+          const isViewingMe = !viewingPlayer || viewingPlayer === user.id
+          return (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>
+                    {isViewingMe ? 'My Teams' : `${getDisplayName(displayMember)}'s Teams`}
+                  </h2>
+                  <p style={{ fontSize: 14, color: 'var(--text2)' }}>{displayPicks.length} of {tpp} teams · {displayMember?.computedPts || 0} pts</p>
                 </div>
-                <div className="card-title">Points breakdown</div>
-                <div className="card">
-                  <table className="pts-table">
-                    <thead><tr><th>Team</th><th>Stage</th><th>Match pts</th><th>Bonus</th><th>Total</th></tr></thead>
-                    <tbody>
-                      {myPicks.map(n => {
-                        const stageBonus = bracket?.stageBonus || {}
-                        const bonus = stageBonus[n] || 0
-                        let stageLabel = 'Group stage'
-                        if (bracket) {
-                          if (bracket.champ?.n === n) stageLabel = 'Champion'
-                          else {
-                            for (const { d, l } of [
-                              { d: bracket.final, l: 'Runner-up' },
-                              { d: bracket.sf, l: 'Semi-final' },
-                              { d: bracket.qf, l: 'Quarter-final' },
-                              { d: bracket.r16, l: 'Round of 16' },
-                              { d: bracket.r32, l: 'Round of 32' },
-                            ]) { if (d?.some(m => m.w?.n === n)) { stageLabel = l; break } }
+                {members.length > 1 && (
+                  <select
+                    className="input"
+                    style={{ width: 'auto', minWidth: 160 }}
+                    value={viewingPlayer || user.id}
+                    onChange={e => setViewingPlayer(e.target.value === user.id ? null : e.target.value)}
+                  >
+                    {rankedMembers.map(m => (
+                      <option key={m.user_id} value={m.user_id}>
+                        {getDisplayName(m)} {m.user_id === user.id ? '(you)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {displayPicks.length === 0 ? (
+                <div className="empty"><div className="empty-icon">🏳️</div><p>No picks yet</p></div>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: '1.5rem', gap: 6 }}>
+                    {displayPicks.map(n => (
+                      <div key={n} className="team-tag">
+                        <Flag team={n} size={16} />
+                        <span style={{ marginLeft: 4 }}>{n}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="card-title">Points breakdown</div>
+                  <div className="card">
+                    <table className="pts-table">
+                      <thead><tr><th>Team</th><th>Stage</th><th>Match pts</th><th>Bonus</th><th>Total</th></tr></thead>
+                      <tbody>
+                        {displayPicks.map(n => {
+                          const stageBonus = bracket?.stageBonus || {}
+                          const bonus = stageBonus[n] || 0
+                          let stageLabel = 'Group stage'
+                          if (bracket) {
+                            if (bracket.champ?.n === n) stageLabel = 'Champion'
+                            else {
+                              for (const { d, l } of [
+                                { d: bracket.final, l: 'Runner-up' },
+                                { d: bracket.sf, l: 'Semi-final' },
+                                { d: bracket.qf, l: 'Quarter-final' },
+                                { d: bracket.r16, l: 'Round of 16' },
+                                { d: bracket.r32, l: 'Round of 32' },
+                              ]) { if (d?.some(m => m.w?.n === n)) { stageLabel = l; break } }
+                            }
                           }
-                        }
-                        const memberData = rankedMembers.find(m => m.user_id === user.id)
-                        const breakdown = memberData?.breakdown?.[n]
-                        const matchPts = Math.max(0, (breakdown?.pts || 0) - bonus)
-                        return (
-                          <tr key={n}>
-                            <td><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Flag team={n} size={16} />{n}</div></td>
-                            <td><span className={`badge ${STAGE_CSS[stageLabel] || 'stage-gs'}`}>{stageLabel}</span></td>
-                            <td style={{ fontFamily: 'var(--mono)' }}>{matchPts > 0 ? `+${matchPts}` : '—'}</td>
-                            <td style={{ fontFamily: 'var(--mono)' }}>{bonus > 0 ? `+${bonus}` : '—'}</td>
-                            <td style={{ fontWeight: 600, fontFamily: 'var(--mono)' }}>{breakdown?.pts || 0}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </>
-        )}
+                          const breakdown = displayMember?.breakdown?.[n]
+                          const matchPts = Math.max(0, (breakdown?.pts || 0) - bonus)
+                          return (
+                            <tr key={n}>
+                              <td><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Flag team={n} size={16} />{n}</div></td>
+                              <td><span className={`badge ${STAGE_CSS[stageLabel] || 'stage-gs'}`}>{stageLabel}</span></td>
+                              <td style={{ fontFamily: 'var(--mono)' }}>{matchPts > 0 ? `+${matchPts}` : '—'}</td>
+                              <td style={{ fontFamily: 'var(--mono)' }}>{bonus > 0 ? `+${bonus}` : '—'}</td>
+                              <td style={{ fontWeight: 600, fontFamily: 'var(--mono)' }}>{breakdown?.pts || 0}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </>
+          )
+        })()}
 
         {/* BRACKET TAB */}
         {tab === 'bracket' && (

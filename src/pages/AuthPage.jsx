@@ -31,10 +31,13 @@ export default function AuthPage() {
   return (
     <div className="auth-wrap">
       <div className="auth-card">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(29,158,117,.2)', border: '1px solid rgba(29,158,117,.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⚽</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+          <div className="logo-icon" style={{ width: 44, height: 44, borderRadius: 12, fontSize: 22 }}>⚽</div>
           <div>
-            <div className="auth-title" style={{ marginBottom: 0 }}>WC Fantasy 2026</div>
+            <div className="logo" style={{ fontSize: 22 }}>
+              <span style={{color:'var(--green)'}}>Fantasy</span>Dub
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>World Cup 2026</div>
           </div>
         </div>
 
