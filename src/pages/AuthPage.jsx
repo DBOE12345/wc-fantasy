@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { DubUpLogoLarge } from '../components/DubUpLogo'
 import { useAuth } from '../hooks/useAuth'
 
 export default function AuthPage() {
@@ -32,7 +33,7 @@ export default function AuthPage() {
     <div className="auth-wrap">
       <div className="auth-card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 28 }}>
-          <div className="logo-icon" style={{ width: 52, height: 52, borderRadius: 12, fontSize: 18 }}>DU</div>
+          <DubUpLogoLarge size={80} />
           <div>
             <div className="logo" style={{ fontSize: 24 }}>
               <span className="clay">DUBUP</span>

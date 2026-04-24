@@ -7,6 +7,7 @@ import { snakeOrder } from '../lib/draft'
 import { simulateBracket } from '../lib/bracket'
 import { fetchFixtures, calcTotalPoints } from '../lib/api'
 import Flag from '../components/Flag'
+import DubUpLogo, { DubUpLogoHorizontal } from '../components/DubUpLogo'
 
 const AV_BG = ['#1a3a2a','#1a2a3a','#3a2a1a','#2a1a3a','#3a1a1a','#1a3a3a','#2a3a1a','#3a3a1a']
 const AV_FG = ['#5DCAA5','#85B7EB','#FAC775','#AFA9EC','#F09595','#5DCAA5','#C0DD97','#FAC775']
@@ -256,6 +257,25 @@ export default function LeaguePage() {
     setTimeLeft(PICK_TIMER)
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
+        if (prev === 10) {
+          // Start ticking sound at 10 seconds
+          try {
+            const ctx = getAudioCtx()
+            let tickCount = 0
+            const tickInterval = setInterval(() => {
+              if (tickCount >= 9) { clearInterval(tickInterval); return }
+              const osc = ctx.createOscillator()
+              const gain = ctx.createGain()
+              osc.connect(gain); gain.connect(ctx.destination)
+              osc.frequency.value = 880
+              osc.type = 'sine'
+              gain.gain.setValueAtTime(0.06, ctx.currentTime)
+              gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08)
+              osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.08)
+              tickCount++
+            }, 1000)
+          } catch(e) {}
+        }
         if (prev <= 1) {
           clearInterval(timerRef.current)
           // Time ran out - auto pick a random available team for me
@@ -448,7 +468,7 @@ export default function LeaguePage() {
                 )
               })}
             </div>
-            <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => setDraftComplete(false)}>View my teams →</button>
+            <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => { setDraftComplete(false); setTab('myteams') }}>View my teams →</button>
           </div>
         </div>
       )}
@@ -515,10 +535,7 @@ export default function LeaguePage() {
         <div className="header-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className="btn btn-ghost" onClick={() => navigate('/')} style={{ padding: '6px 8px', fontSize: 18 }}>←</button>
-            <div className="logo">
-              <div className="logo-icon">DU</div>
-              <span className="clay">DUBUP</span>
-            </div>
+            <DubUpLogoHorizontal height={28} />
             <span style={{ color: 'var(--text3)', fontSize: 13 }}>·</span>
             <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '.04em', fontFamily: 'var(--font-display)' }}>{league?.name}</span>
           </div>
@@ -995,9 +1012,9 @@ export default function LeaguePage() {
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}>
         {[
-          { id: 'league', label: 'League', icon: (active) => (
+          { id: 'league', label: 'Home', icon: (active) => (
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--clay)' : 'var(--text3)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
             </svg>
           )},
           { id: 'draft', label: 'Draft', icon: (active) => (
@@ -1012,7 +1029,10 @@ export default function LeaguePage() {
           )},
           { id: 'bracket', label: 'Bracket', icon: (active) => (
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--clay)' : 'var(--text3)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+              <line x1="3" y1="5" x2="3" y2="19"/><line x1="3" y1="5" x2="7" y2="5"/><line x1="3" y1="19" x2="7" y2="19"/>
+              <line x1="3" y1="12" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12" y2="16"/><line x1="12" y1="8" x2="16" y2="8"/><line x1="12" y1="16" x2="16" y2="16"/>
+              <line x1="16" y1="12" x2="21" y2="12"/>
             </svg>
           )},
           { id: 'chat', label: 'Chat', icon: (active) => (

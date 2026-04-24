@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import DubUpLogo, { DubUpLogoLarge } from '../components/DubUpLogo'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
@@ -44,20 +45,8 @@ export default function WelcomePage() {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 72px)', padding: '2rem', textAlign: 'center', position: 'relative', zIndex: 5 }}>
 
         {/* Big DU logo */}
-        <div style={{
-          width: 100, height: 100,
-          background: 'var(--clay)',
-          borderRadius: 24,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: 'var(--font-display)',
-          fontWeight: 900,
-          fontSize: 40,
-          color: 'var(--sand)',
-          letterSpacing: '-0.03em',
-          marginBottom: 24,
-          boxShadow: '0 0 40px rgba(193,73,46,0.5), 0 20px 40px rgba(0,0,0,0.4)',
-        }}>
-          DU
+        <div style={{ marginBottom: 24 }}>
+          <DubUpLogoLarge size={110} />
         </div>
 
         {/* Brand name */}
@@ -163,7 +152,7 @@ export default function WelcomePage() {
           >
             {/* Menu header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
-              <div style={{ width: 44, height: 44, background: 'var(--clay)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 18, color: 'var(--sand)' }}>DU</div>
+              <DubUpLogoLarge size={44} />
               <div>
                 <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 18, textTransform: 'uppercase', letterSpacing: '.04em' }}>
                   <span style={{ color: 'var(--clay)' }}>DUB</span>UP
