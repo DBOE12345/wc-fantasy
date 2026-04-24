@@ -29,65 +29,73 @@ function getAudioCtx() {
 function playSound(type) {
   try {
     const ctx = getAudioCtx()
-    
+
     if (type === 'draft_start') {
-      // Referee whistle sound
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.frequency.setValueAtTime(1400, ctx.currentTime)
-      osc.frequency.exponentialRampToValueAtTime(1800, ctx.currentTime + 0.1)
-      osc.frequency.exponentialRampToValueAtTime(1400, ctx.currentTime + 0.3)
-      gain.gain.setValueAtTime(0.3, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
-      osc.start(ctx.currentTime)
-      osc.stop(ctx.currentTime + 0.5)
-      // Second whistle
-      setTimeout(() => {
-        const o2 = ctx.createOscillator()
-        const g2 = ctx.createGain()
-        o2.connect(g2); g2.connect(ctx.destination)
-        o2.frequency.setValueAtTime(1600, ctx.currentTime)
-        o2.frequency.exponentialRampToValueAtTime(2000, ctx.currentTime + 0.1)
-        g2.gain.setValueAtTime(0.3, ctx.currentTime)
-        g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
-        o2.start(ctx.currentTime); o2.stop(ctx.currentTime + 0.4)
-      }, 400)
+      // Referee whistle - long sharp tweet x2
+      function whistle(startTime, freq, dur) {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        const dist = ctx.createWaveShaper()
+        // distortion curve for reedy whistle texture
+        const curve = new Float32Array(256)
+        for (let i = 0; i < 256; i++) { const x = (i * 2) / 256 - 1; curve[i] = (Math.PI + 200) * x / (Math.PI + 200 * Math.abs(x)) }
+        dist.curve = curve
+        osc.connect(dist); dist.connect(gain); gain.connect(ctx.destination)
+        osc.type = 'sawtooth'
+        osc.frequency.setValueAtTime(freq, startTime)
+        osc.frequency.linearRampToValueAtTime(freq * 1.04, startTime + dur * 0.3)
+        osc.frequency.linearRampToValueAtTime(freq, startTime + dur)
+        gain.gain.setValueAtTime(0, startTime)
+        gain.gain.linearRampToValueAtTime(0.18, startTime + 0.03)
+        gain.gain.setValueAtTime(0.18, startTime + dur - 0.05)
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur)
+        osc.start(startTime); osc.stop(startTime + dur)
+      }
+      whistle(ctx.currentTime, 2400, 0.5)
+      whistle(ctx.currentTime + 0.65, 2600, 0.7)
     }
 
     if (type === 'pick') {
-      // Crowd "Ole!" — rising cheer
-      const notes = [523, 659, 784, 1047]
-      notes.forEach((freq, i) => {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.connect(gain); gain.connect(ctx.destination)
-        osc.type = 'sine'
-        osc.frequency.value = freq
-        const t = ctx.currentTime + i * 0.08
-        gain.gain.setValueAtTime(0, t)
-        gain.gain.linearRampToValueAtTime(0.2, t + 0.05)
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3)
-        osc.start(t); osc.stop(t + 0.3)
-      })
+      // Short crowd cheer burst — noise swell
+      const bufferSize = ctx.sampleRate * 0.4
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+      const data = buffer.getChannelData(0)
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'bandpass'
+      filter.frequency.value = 800
+      filter.Q.value = 0.8
+      const gain = ctx.createGain()
+      source.connect(filter); filter.connect(gain); gain.connect(ctx.destination)
+      gain.gain.setValueAtTime(0, ctx.currentTime)
+      gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.05)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
+      source.start(ctx.currentTime); source.stop(ctx.currentTime + 0.4)
     }
 
     if (type === 'complete') {
-      // Victory fanfare
-      const melody = [523, 659, 784, 1047, 784, 1047, 1319]
-      melody.forEach((freq, i) => {
+      // Three sharp referee whistles = full time!
+      function whistle(startTime, freq, dur) {
         const osc = ctx.createOscillator()
         const gain = ctx.createGain()
-        osc.connect(gain); gain.connect(ctx.destination)
-        osc.type = 'triangle'
+        const dist = ctx.createWaveShaper()
+        const curve = new Float32Array(256)
+        for (let i = 0; i < 256; i++) { const x = (i * 2) / 256 - 1; curve[i] = (Math.PI + 200) * x / (Math.PI + 200 * Math.abs(x)) }
+        dist.curve = curve
+        osc.connect(dist); dist.connect(gain); gain.connect(ctx.destination)
+        osc.type = 'sawtooth'
         osc.frequency.value = freq
-        const t = ctx.currentTime + i * 0.12
-        gain.gain.setValueAtTime(0, t)
-        gain.gain.linearRampToValueAtTime(0.25, t + 0.05)
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35)
-        osc.start(t); osc.stop(t + 0.35)
-      })
+        gain.gain.setValueAtTime(0, startTime)
+        gain.gain.linearRampToValueAtTime(0.2, startTime + 0.03)
+        gain.gain.setValueAtTime(0.2, startTime + dur - 0.04)
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur)
+        osc.start(startTime); osc.stop(startTime + dur)
+      }
+      whistle(ctx.currentTime, 2400, 0.3)
+      whistle(ctx.currentTime + 0.45, 2400, 0.3)
+      whistle(ctx.currentTime + 0.9, 2600, 0.8)
     }
   } catch(e) {
     console.log('Sound not supported:', e)
@@ -219,12 +227,21 @@ export default function LeaguePage() {
     return () => supabase.removeChannel(channel)
   }, [load, id])
 
-  // Draft countdown timer
+  // Draft countdown timer + auto-start
   useEffect(() => {
     if (!league?.scheduled_at || draftStarted) { setCountdown(null); return }
-    const tick = () => {
+    const tick = async () => {
       const diff = new Date(league.scheduled_at) - new Date()
-      if (diff <= 0) { setCountdown('Starting now!'); return }
+      if (diff <= 0) {
+        setCountdown(null)
+        // Auto-start the draft!
+        if (!draftStarted) {
+          await supabase.from('leagues').update({ draft_started: true, bracket_data: null }).eq('id', id)
+          setDraftStarted(true)
+          try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 100) } catch(e) {}
+        }
+        return
+      }
       const h = Math.floor(diff / 3600000)
       const m = Math.floor((diff % 3600000) / 60000)
       const s = Math.floor((diff % 60000) / 1000)
@@ -233,7 +250,7 @@ export default function LeaguePage() {
     tick()
     const t = setInterval(tick, 1000)
     return () => clearInterval(t)
-  }, [league?.scheduled_at, draftStarted])
+  }, [league?.scheduled_at, draftStarted, id])
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -378,12 +395,16 @@ export default function LeaguePage() {
 
   async function saveSchedule() {
     if (!scheduledTime) return
-    setSavingSchedule(true)
-    // Convert local datetime to ISO string to preserve timezone
     const localDate = new Date(scheduledTime)
+    // Validate it's in the future
+    if (localDate <= new Date()) {
+      alert('Invalid date/time — please enter a future time.')
+      return
+    }
+    setSavingSchedule(true)
     await supabase.from('leagues').update({ scheduled_at: localDate.toISOString() }).eq('id', id)
     setSavingSchedule(false)
-    alert('Draft time saved! Shows as: ' + localDate.toLocaleString())
+    alert('Draft time saved! ' + localDate.toLocaleString())
   }
 
   async function sendChat() {
@@ -535,7 +556,7 @@ export default function LeaguePage() {
         <div className="header-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className="btn btn-ghost" onClick={() => navigate('/')} style={{ padding: '6px 8px', fontSize: 18 }}>←</button>
-            <DubUpLogoHorizontal height={28} />
+            <DubUpLogoHorizontal height={34} />
             <span style={{ color: 'var(--text3)', fontSize: 13 }}>·</span>
             <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '.04em', fontFamily: 'var(--font-display)' }}>{league?.name}</span>
           </div>
@@ -572,14 +593,27 @@ export default function LeaguePage() {
               <p style={{ fontSize: 12, color: 'var(--text3)' }}>Share this code with friends to join your league</p>
             </div>
 
-            {countdown && (
-              <div style={{ background: 'rgba(239,159,39,.1)', border: '1px solid rgba(239,159,39,.3)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ fontSize: 14, color: '#FAC775', fontWeight: 500 }}>⏰ Draft starts in</div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 20, fontWeight: 700, color: '#FAC775' }}>{countdown}</div>
+            {/* Draft in progress banner */}
+            {draftStarted && !draftDone && (
+              <div style={{ background: 'rgba(193,73,46,.1)', border: '1px solid rgba(193,73,46,.35)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: 14, color: 'var(--clay-light)', fontWeight: 700, fontFamily: 'var(--font-display)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 2 }}>⚽ Draft in progress</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)' }}>{isMyTurn ? "It's your turn to pick!" : 'Waiting for other players...'}</div>
+                </div>
+                <button className="btn btn-primary" style={{ fontSize: 12, padding: '8px 16px' }} onClick={() => setTab('draft')}>
+                  Join Draft →
+                </button>
               </div>
             )}
 
-            <div className="card" style={{ marginBottom: '1.5rem' }}>
+            {countdown && !draftStarted && (
+              <div style={{ background: 'rgba(200,169,106,.08)', border: '1px solid rgba(200,169,106,.25)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: 14, color: 'var(--gold)', fontWeight: 600 }}>⏰ Draft starts in</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 20, fontWeight: 700, color: 'var(--gold)' }}>{countdown}</div>
+              </div>
+            )}
+
+            {!draftDone && !draftStarted && <div className="card" style={{ marginBottom: '1.5rem' }}>
               <div className="card-title">Draft schedule</div>
               {league?.scheduled_at && (
                 <div style={{ marginBottom: 12, fontSize: 14, color: 'var(--text2)' }}>
@@ -596,9 +630,7 @@ export default function LeaguePage() {
                 </>
               )}
               {!isCommissioner && !draftStarted && <p style={{ fontSize: 14, color: 'var(--text2)' }}>Waiting for the commissioner to start the draft.</p>}
-              {draftStarted && !draftDone && <p style={{ fontSize: 14, color: '#5DCAA5', fontWeight: 500 }}>🟢 Draft is live! Each player has 60 seconds per pick.</p>}
-              {draftDone && <p style={{ fontSize: 14, color: '#5DCAA5', fontWeight: 500 }}>✅ Draft complete!</p>}
-            </div>
+            </div>}
 
             <div className="card-title">Leaderboard <span style={{fontSize:11,color:'var(--text3)',fontWeight:400,textTransform:'none',letterSpacing:0}}>tap a player to see their teams</span></div>
             <div className="card">
@@ -880,7 +912,8 @@ export default function LeaguePage() {
                         {matches.map((m, i) => (
                           <div key={i} className="b-match">
                             {[{ team: m.a, goals: m.ag }, { team: m.b, goals: m.bg }].map(({ team, goals }, ti) => (
-                              <div key={ti} className={`b-team ${m.w?.n === team?.n ? 'winner' : ''} ${myPicks.includes(team?.n) ? 'my-team' : ''}`}>
+                              <div key={ti} className={`b-team ${m.w?.n === team?.n ? 'winner' : ''} ${myPicks.includes(team?.n) ? 'my-team' : ''}`}
+                                style={myPicks.includes(team?.n) ? { background: 'rgba(193,73,46,0.2)', borderLeft: '3px solid var(--clay)', paddingLeft: 5 } : {}}>
                                 <Flag team={team?.n} size={12} />
                                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 4 }}>{team?.n}</span>
                                 <span className="b-score">{goals}</span>
@@ -896,7 +929,8 @@ export default function LeaguePage() {
                       <div className="b-round-title">🏆</div>
                       <div className="b-matches">
                         <div className="b-match">
-                          <div className={`b-team winner ${myPicks.includes(bracket.champ.n) ? 'my-team' : ''}`}>
+                          <div className={`b-team winner ${myPicks.includes(bracket.champ.n) ? 'my-team' : ''}`}
+                            style={myPicks.includes(bracket.champ.n) ? { background: 'rgba(193,73,46,0.25)', borderLeft: '3px solid var(--clay)', paddingLeft: 5 } : {}}>
                             <Flag team={bracket.champ.n} size={12} />
                             <span style={{ marginLeft: 4 }}>{bracket.champ.n}</span>
                           </div>

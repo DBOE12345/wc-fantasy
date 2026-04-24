@@ -45,20 +45,12 @@ export default function WelcomePage() {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 72px)', padding: '2rem', textAlign: 'center', position: 'relative', zIndex: 5 }}>
 
         {/* Big DU logo */}
-        <div style={{ marginBottom: 24 }}>
-          <DubUpLogoLarge size={110} />
-        </div>
-
-        {/* Brand name */}
-        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 42, color: 'var(--text)', letterSpacing: '-0.01em', lineHeight: 1, marginBottom: 6, textTransform: 'uppercase' }}>
-          <span style={{ color: 'var(--clay)' }}>DUB</span>UP
-        </div>
-        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, color: 'var(--text2)', letterSpacing: '.25em', textTransform: 'uppercase', marginBottom: 12 }}>
-          FANTASY
+        <div style={{ marginBottom: 20, filter: 'drop-shadow(0 0 30px rgba(193,73,46,0.35))' }}>
+          <DubUpLogoLarge size={180} />
         </div>
 
         {/* Tagline */}
-        <div style={{ fontSize: 14, color: 'var(--text3)', marginBottom: 56, fontStyle: 'italic', letterSpacing: '.02em' }}>
+        <div style={{ fontSize: 14, color: 'var(--text3)', marginBottom: 48, fontStyle: 'italic', letterSpacing: '.02em' }}>
           Play for pride. Play for money. Play for dubs.
         </div>
 
@@ -107,7 +99,6 @@ export default function WelcomePage() {
           {/* Coming soon cards */}
           {[
             { emoji: '🏈', name: 'NFL Fantasy', sub: 'Coming soon', season: 'Fall 2026' },
-            { emoji: '⛳', name: 'Golf Fantasy', sub: 'Coming soon', season: 'Masters 2026' },
           ].map(item => (
             <button
               key={item.name}
@@ -177,7 +168,7 @@ export default function WelcomePage() {
                 <span style={{ fontSize: 22 }}>🏈</span>
                 <div>
                   <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '.04em' }}>NFL Fantasy</div>
-                  <div style={{ fontSize: 11, color: 'var(--text3)' }}>Coming soon</div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)' }}>Coming Fall 2026</div>
                 </div>
               </button>
             </div>
