@@ -31,28 +31,25 @@ function playSound(type) {
     const ctx = getAudioCtx()
 
     if (type === 'draft_start') {
-      // Referee whistle - long sharp tweet x2
-      function whistle(startTime, freq, dur) {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        const dist = ctx.createWaveShaper()
-        // distortion curve for reedy whistle texture
-        const curve = new Float32Array(256)
-        for (let i = 0; i < 256; i++) { const x = (i * 2) / 256 - 1; curve[i] = (Math.PI + 200) * x / (Math.PI + 200 * Math.abs(x)) }
-        dist.curve = curve
-        osc.connect(dist); dist.connect(gain); gain.connect(ctx.destination)
-        osc.type = 'sawtooth'
-        osc.frequency.setValueAtTime(freq, startTime)
-        osc.frequency.linearRampToValueAtTime(freq * 1.04, startTime + dur * 0.3)
-        osc.frequency.linearRampToValueAtTime(freq, startTime + dur)
-        gain.gain.setValueAtTime(0, startTime)
-        gain.gain.linearRampToValueAtTime(0.18, startTime + 0.03)
-        gain.gain.setValueAtTime(0.18, startTime + dur - 0.05)
-        gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur)
-        osc.start(startTime); osc.stop(startTime + dur)
+      // Soccer referee whistle - two short blasts
+      function refWhistle(startTime, dur) {
+        // Main tone ~800Hz with harmonics for pea-whistle sound
+        [800, 1600, 2400].forEach((freq, hi) => {
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(ctx.destination)
+          osc.type = 'square'
+          osc.frequency.value = freq
+          const vol = hi === 0 ? 0.18 : hi === 1 ? 0.06 : 0.03
+          gain.gain.setValueAtTime(0, startTime)
+          gain.gain.linearRampToValueAtTime(vol, startTime + 0.02)
+          gain.gain.setValueAtTime(vol, startTime + dur - 0.05)
+          gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur)
+          osc.start(startTime); osc.stop(startTime + dur)
+        })
       }
-      whistle(ctx.currentTime, 2400, 0.5)
-      whistle(ctx.currentTime + 0.65, 2600, 0.7)
+      refWhistle(ctx.currentTime, 0.35)
+      refWhistle(ctx.currentTime + 0.5, 0.5)
     }
 
     if (type === 'pick') {
@@ -76,26 +73,25 @@ function playSound(type) {
     }
 
     if (type === 'complete') {
-      // Three sharp referee whistles = full time!
-      function whistle(startTime, freq, dur) {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        const dist = ctx.createWaveShaper()
-        const curve = new Float32Array(256)
-        for (let i = 0; i < 256; i++) { const x = (i * 2) / 256 - 1; curve[i] = (Math.PI + 200) * x / (Math.PI + 200 * Math.abs(x)) }
-        dist.curve = curve
-        osc.connect(dist); dist.connect(gain); gain.connect(ctx.destination)
-        osc.type = 'sawtooth'
-        osc.frequency.value = freq
-        gain.gain.setValueAtTime(0, startTime)
-        gain.gain.linearRampToValueAtTime(0.2, startTime + 0.03)
-        gain.gain.setValueAtTime(0.2, startTime + dur - 0.04)
-        gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur)
-        osc.start(startTime); osc.stop(startTime + dur)
+      // Three referee whistles = full time!
+      function refWhistle(startTime, dur) {
+        [800, 1600, 2400].forEach((freq, hi) => {
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(ctx.destination)
+          osc.type = 'square'
+          osc.frequency.value = freq
+          const vol = hi === 0 ? 0.18 : hi === 1 ? 0.06 : 0.03
+          gain.gain.setValueAtTime(0, startTime)
+          gain.gain.linearRampToValueAtTime(vol, startTime + 0.02)
+          gain.gain.setValueAtTime(vol, startTime + dur - 0.04)
+          gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur)
+          osc.start(startTime); osc.stop(startTime + dur)
+        })
       }
-      whistle(ctx.currentTime, 2400, 0.3)
-      whistle(ctx.currentTime + 0.45, 2400, 0.3)
-      whistle(ctx.currentTime + 0.9, 2600, 0.8)
+      refWhistle(ctx.currentTime, 0.25)
+      refWhistle(ctx.currentTime + 0.4, 0.25)
+      refWhistle(ctx.currentTime + 0.8, 0.7)
     }
   } catch(e) {
     console.log('Sound not supported:', e)
@@ -214,7 +210,13 @@ export default function LeaguePage() {
         const updated = payload.new
         if (updated) {
           setLeague(updated)
-          setDraftStarted(!!updated.draft_started)
+          const wasStarted = draftStarted
+          const nowStarted = !!updated.draft_started
+          setDraftStarted(nowStarted)
+          // Only play whistle if draft JUST started via real-time (another user started it)
+          if (!wasStarted && nowStarted && !didStartRef.current) {
+            try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 100) } catch(e) {}
+          }
           if (updated.bracket_data) {
             try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
           }
@@ -238,6 +240,7 @@ export default function LeaguePage() {
         if (!draftStarted) {
           await supabase.from('leagues').update({ draft_started: true, bracket_data: null }).eq('id', id)
           setDraftStarted(true)
+          didStartRef.current = true
           try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 100) } catch(e) {}
         }
         return
@@ -265,13 +268,12 @@ export default function LeaguePage() {
     const whoseTurn = getTurn(draftPos, leagueSize)
     const draftDoneNow = draftPos >= (48 / leagueSize) * leagueSize || Object.keys(picks).length >= 48
     const isMyTurnNow = draftStarted && !draftDoneNow && whoseTurn === mySlot
-    if (!isMyTurnNow) {
-      setTimeLeft(PICK_TIMER)
-      return
-    }
-    // Send notification that it's my turn
-    sendPickNotification()
+    // Always reset timer when turn changes
     setTimeLeft(PICK_TIMER)
+    // Only run countdown and notifications when it's my turn OR when draft is active (so everyone sees the clock)
+    if (!draftStarted || draftDoneNow) return
+    // Send notification when it becomes my turn
+    if (isMyTurnNow) sendPickNotification()
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev === 10) {
@@ -374,7 +376,6 @@ export default function LeaguePage() {
 
   async function startDraft() {
     getAudioCtx()
-    // Request notification permission
     if ('Notification' in window && Notification.permission === 'default') {
       await Notification.requestPermission()
     }
@@ -382,6 +383,9 @@ export default function LeaguePage() {
     setDraftStarted(true)
     setTimeout(() => playSound('draft_start'), 100)
   }
+
+  // Track whether WE triggered the draft start (vs loading into an already-started draft)
+  const didStartRef = useRef(false)
 
   function sendPickNotification(playerName) {
     if ('Notification' in window && Notification.permission === 'granted') {

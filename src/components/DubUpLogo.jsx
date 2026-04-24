@@ -2,35 +2,45 @@ import iconImg from '../assets/dubup-logo-icon.png'
 import stackedImg from '../assets/dubup-logo-stacked.png'
 import horizontalImg from '../assets/dubup-logo-horizontal.png'
 
-// Icon only - used in headers and small spaces
+// Detects if image is JPEG (black bg) or PNG (transparent)
+// We use mix-blend-mode: screen to remove black backgrounds from JPEGs
+const blendStyle = { mixBlendMode: 'screen' }
+
+// Icon only - used in headers
 export default function DubUpLogo({ size = 40 }) {
   return (
-    <img
-      src={iconImg}
-      alt="DubUp"
-      style={{ width: size, height: size, objectFit: 'contain', flexShrink: 0 }}
-    />
+    <div style={{ width: size, height: size, flexShrink: 0, overflow: 'hidden' }}>
+      <img
+        src={iconImg}
+        alt="DubUp"
+        style={{ width: '100%', height: '100%', objectFit: 'contain', ...blendStyle }}
+      />
+    </div>
   )
 }
 
-// Stacked logo - used on welcome screen
-export function DubUpLogoLarge({ size = 120 }) {
+// Stacked logo - welcome screen
+export function DubUpLogoLarge({ size = 180 }) {
   return (
-    <img
-      src={stackedImg}
-      alt="DubUp Fantasy"
-      style={{ width: size, height: size, objectFit: 'contain', flexShrink: 0 }}
-    />
+    <div style={{ width: size, height: size, flexShrink: 0, overflow: 'hidden' }}>
+      <img
+        src={stackedImg}
+        alt="DubUp Fantasy"
+        style={{ width: '100%', height: '100%', objectFit: 'contain', ...blendStyle }}
+      />
+    </div>
   )
 }
 
-// Horizontal logo - used in nav headers
+// Horizontal - nav headers
 export function DubUpLogoHorizontal({ height = 36 }) {
   return (
-    <img
-      src={horizontalImg}
-      alt="DubUp Fantasy"
-      style={{ height: height, width: 'auto', objectFit: 'contain', flexShrink: 0 }}
-    />
+    <div style={{ height: height, flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
+      <img
+        src={horizontalImg}
+        alt="DubUp Fantasy"
+        style={{ height: '100%', width: 'auto', objectFit: 'contain', ...blendStyle }}
+      />
+    </div>
   )
 }

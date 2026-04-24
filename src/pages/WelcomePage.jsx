@@ -45,13 +45,13 @@ export default function WelcomePage() {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 72px)', padding: '2rem', textAlign: 'center', position: 'relative', zIndex: 5 }}>
 
         {/* Big DU logo */}
-        <div style={{ marginBottom: 20, filter: 'drop-shadow(0 0 30px rgba(193,73,46,0.35))' }}>
-          <DubUpLogoLarge size={180} />
+        <div style={{ marginBottom: 16 }}>
+          <DubUpLogoLarge size={220} />
         </div>
 
         {/* Tagline */}
-        <div style={{ fontSize: 14, color: 'var(--text3)', marginBottom: 48, fontStyle: 'italic', letterSpacing: '.02em' }}>
-          Play for pride. Play for money. Play for dubs.
+        <div style={{ fontSize: 15, color: 'var(--sand)', marginBottom: 48, letterSpacing: '.04em', textAlign: 'center', lineHeight: 1.7, fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase' }}>
+          Play for Pride.<br/>Play for Money.<br/><span style={{ color: 'var(--clay)' }}>Play for Dubs.</span>
         </div>
 
         {/* Select a game CTA */}
