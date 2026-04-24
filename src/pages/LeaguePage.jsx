@@ -18,9 +18,16 @@ const STAGE_CSS = {
 const PICK_TIMER = 60
 
 // Sound effects using Web Audio API
+let audioCtx = null
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+  if (audioCtx.state === 'suspended') audioCtx.resume()
+  return audioCtx
+}
+
 function playSound(type) {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+    const ctx = getAudioCtx()
     
     if (type === 'draft_start') {
       // Referee whistle sound
@@ -271,9 +278,11 @@ export default function LeaguePage() {
   }
 
   async function startDraft() {
-    await supabase.from('leagues').update({ draft_started: true }).eq('id', id)
+    getAudioCtx() // initialize audio on user gesture
+    // Clear old bracket so it regenerates fresh after this draft
+    await supabase.from('leagues').update({ draft_started: true, bracket_data: null }).eq('id', id)
     setDraftStarted(true)
-    playSound('draft_start')
+    setTimeout(() => playSound('draft_start'), 100)
   }
 
   async function saveSchedule() {
@@ -304,6 +313,17 @@ export default function LeaguePage() {
     }).sort((a, b) => b.computedPts - a.computedPts)
   }
 
+  // Trigger draft complete popup - MUST be before any conditional returns
+  const prevDraftDoneRef = useRef(false)
+  const draftDoneCalc = (league?.draft_pos || 0) >= snakeOrder(league?.size || 4, 48).length || Object.keys(picks).length >= 48
+  useEffect(() => {
+    if (draftDoneCalc && !prevDraftDoneRef.current && draftStarted) {
+      setDraftComplete(true)
+      playSound('complete')
+    }
+    prevDraftDoneRef.current = draftDoneCalc
+  }, [draftDoneCalc, draftStarted])
+
   if (loading) return <div className="container page-wrap"><div className="empty">Loading league...</div></div>
 
   const tpp = 48 / (league?.size || 4)
@@ -311,23 +331,12 @@ export default function LeaguePage() {
   const draftPos = league?.draft_pos || 0
   const currentTurn = order[draftPos]
   const isMyTurn = currentTurn === mySlot
-  const draftDone = draftPos >= order.length || Object.keys(picks).length >= 48
+  const draftDone = draftDoneCalc
   const myPicks = Object.entries(picks).filter(([, uid]) => uid === user.id).map(([t]) => t)
-  // Bot picks use 'bot_X' as user_id - exclude them from 'taken by others'
-  const realPicks = Object.fromEntries(Object.entries(picks).filter(([, uid]) => !uid.startsWith('bot_')))
   const rankedMembers = computePoints()
   const maxPts = Math.max(1, rankedMembers[0]?.computedPts || 1)
   const isCommissioner = league?.creator_id === user.id
   const timerColor = timeLeft > 30 ? '#5DCAA5' : timeLeft > 10 ? '#FAC775' : '#F09595'
-
-  // Trigger draft complete popup
-  const prevDraftDoneRef = useRef(false)
-  useEffect(() => {
-    if (draftDone && !prevDraftDoneRef.current && draftStarted) {
-      setDraftComplete(true)
-    }
-    prevDraftDoneRef.current = draftDone
-  }, [draftDone, draftStarted])
 
   return (
     <div>
@@ -354,7 +363,8 @@ export default function LeaguePage() {
       )}
       {/* Player Detail Modal */}
       {selectedPlayer && (() => {
-        const p = selectedPlayer
+        // Get fresh data from rankedMembers in case points updated
+        const p = rankedMembers.find(m => m.user_id === selectedPlayer.user_id) || selectedPlayer
         const stageBonus = bracket?.stageBonus || {}
         const STAGE_CSS_MAP = {
           'Champion':'stage-ch','Runner-up':'stage-ru','Semi-final':'stage-sf',
@@ -603,14 +613,14 @@ export default function LeaguePage() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 7 }}>
                   {TEAMS.filter(t => t.g === group).map(t => {
                     const owner = picks[t.n]
-                    const isMine = owner === user.id
-                    const isTakenByBot = owner?.startsWith('bot_')
-                    const isTaken = owner && !isMine && !isTakenByBot
-                    const isAnyonePicked = owner && !isMine
-                    const ownerMember = isTaken ? members.find(m => m.user_id === owner) : null
-                    const canPick = draftStarted && isMyTurn && !draftDone && !owner
+                    const isMine = owner !== undefined && owner === user.id
+                    const isBot = owner !== undefined && typeof owner === 'string' && owner.startsWith('bot_')
+                    const isTakenByOther = owner !== undefined && !isMine && !isBot
+                    const isAnyonePicked = owner !== undefined
+                    const ownerMember = isTakenByOther ? members.find(m => m.user_id === owner) : null
+                    const canPick = draftStarted && isMyTurn && !draftDone && !isAnyonePicked
                     return (
-                      <div key={t.n} className={`team-card ${isMine ? 'mine' : ''} ${isAnyonePicked ? 'taken' : ''}`} onClick={() => canPick && makePick(t.n)} style={{ cursor: canPick ? 'pointer' : isAnyonePicked ? 'not-allowed' : 'default' }}>
+                      <div key={t.n} className={`team-card ${isMine ? 'mine' : ''} ${isAnyonePicked && !isMine ? 'taken' : ''}`} onClick={() => canPick && makePick(t.n)} style={{ cursor: canPick ? 'pointer' : isAnyonePicked ? 'not-allowed' : 'default' }}>
                         {isMine && <div className="pick-check">✓</div>}
                         {isTaken && ownerMember && (
                           <div style={{ position: 'absolute', top: 4, right: 4, width: 15, height: 15, borderRadius: '50%', background: AV_BG[ownerMember.draft_slot % 8], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, fontWeight: 700, color: AV_FG[ownerMember.draft_slot % 8] }}>
