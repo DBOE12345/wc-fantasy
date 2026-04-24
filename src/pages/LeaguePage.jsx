@@ -17,6 +17,75 @@ const STAGE_CSS = {
 }
 const PICK_TIMER = 60
 
+// Sound effects using Web Audio API
+function playSound(type) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+    
+    if (type === 'draft_start') {
+      // Referee whistle sound
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.frequency.setValueAtTime(1400, ctx.currentTime)
+      osc.frequency.exponentialRampToValueAtTime(1800, ctx.currentTime + 0.1)
+      osc.frequency.exponentialRampToValueAtTime(1400, ctx.currentTime + 0.3)
+      gain.gain.setValueAtTime(0.3, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
+      osc.start(ctx.currentTime)
+      osc.stop(ctx.currentTime + 0.5)
+      // Second whistle
+      setTimeout(() => {
+        const o2 = ctx.createOscillator()
+        const g2 = ctx.createGain()
+        o2.connect(g2); g2.connect(ctx.destination)
+        o2.frequency.setValueAtTime(1600, ctx.currentTime)
+        o2.frequency.exponentialRampToValueAtTime(2000, ctx.currentTime + 0.1)
+        g2.gain.setValueAtTime(0.3, ctx.currentTime)
+        g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
+        o2.start(ctx.currentTime); o2.stop(ctx.currentTime + 0.4)
+      }, 400)
+    }
+
+    if (type === 'pick') {
+      // Crowd "Ole!" — rising cheer
+      const notes = [523, 659, 784, 1047]
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(ctx.destination)
+        osc.type = 'sine'
+        osc.frequency.value = freq
+        const t = ctx.currentTime + i * 0.08
+        gain.gain.setValueAtTime(0, t)
+        gain.gain.linearRampToValueAtTime(0.2, t + 0.05)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3)
+        osc.start(t); osc.stop(t + 0.3)
+      })
+    }
+
+    if (type === 'complete') {
+      // Victory fanfare
+      const melody = [523, 659, 784, 1047, 784, 1047, 1319]
+      melody.forEach((freq, i) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(ctx.destination)
+        osc.type = 'triangle'
+        osc.frequency.value = freq
+        const t = ctx.currentTime + i * 0.12
+        gain.gain.setValueAtTime(0, t)
+        gain.gain.linearRampToValueAtTime(0.25, t + 0.05)
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35)
+        osc.start(t); osc.stop(t + 0.35)
+      })
+    }
+  } catch(e) {
+    console.log('Sound not supported:', e)
+  }
+}
+
 // Determine whose turn it is given draft position and league size
 function getTurn(draftPos, leagueSize) {
   const order = []
@@ -45,6 +114,9 @@ export default function LeaguePage() {
   const [copied, setCopied] = useState(false)
   const [timeLeft, setTimeLeft] = useState(PICK_TIMER)
   const [draftStarted, setDraftStarted] = useState(false)
+  const [picksOrdered, setPicksOrdered] = useState([])
+  const [draftComplete, setDraftComplete] = useState(false)
+  const [selectedPlayer, setSelectedPlayer] = useState(null) // for player detail modal
   const [scheduledTime, setScheduledTime] = useState('')
   const [savingSchedule, setSavingSchedule] = useState(false)
   const timerRef = useRef(null)
@@ -80,10 +152,11 @@ export default function LeaguePage() {
     console.log('My slot:', myDraftSlot, 'All members:', memsWithProfiles.map(m => ({ slot: m.draft_slot, uid: m.user_id.slice(0,8) })))
 
     const { data: pickData } = await supabase
-      .from('picks').select('team_name, user_id').eq('league_id', id)
+      .from('picks').select('team_name, user_id, picked_at').eq('league_id', id).order('picked_at')
     const pickMap = {}
     pickData?.forEach(p => { pickMap[p.team_name] = p.user_id })
     setPicks(pickMap)
+    setPicksOrdered(pickData || [])
 
     if (lg.bracket_data) setBracket(JSON.parse(lg.bracket_data))
     else if (Object.keys(pickMap).length >= 48) {
@@ -181,10 +254,17 @@ export default function LeaguePage() {
       })
       if (error) return
 
+      // Update local ordered picks immediately
+      setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
+      playSound('pick')
+
       // Advance draft position by exactly 1
-      await supabase.from('leagues').update({
-        draft_pos: freshLeague.draft_pos + 1
-      }).eq('id', id)
+      const newPos = freshLeague.draft_pos + 1
+      await supabase.from('leagues').update({ draft_pos: newPos }).eq('id', id)
+
+      // Check if draft is now complete
+      const totalPicks = Object.keys(picks).length + 1
+      if (totalPicks >= 48) { setDraftComplete(true); playSound('complete') }
     } finally {
       pickingRef.current = false
     }
@@ -193,6 +273,7 @@ export default function LeaguePage() {
   async function startDraft() {
     await supabase.from('leagues').update({ draft_started: true }).eq('id', id)
     setDraftStarted(true)
+    playSound('draft_start')
   }
 
   async function saveSchedule() {
@@ -232,13 +313,103 @@ export default function LeaguePage() {
   const isMyTurn = currentTurn === mySlot
   const draftDone = draftPos >= order.length || Object.keys(picks).length >= 48
   const myPicks = Object.entries(picks).filter(([, uid]) => uid === user.id).map(([t]) => t)
+  // Bot picks use 'bot_X' as user_id - exclude them from 'taken by others'
+  const realPicks = Object.fromEntries(Object.entries(picks).filter(([, uid]) => !uid.startsWith('bot_')))
   const rankedMembers = computePoints()
   const maxPts = Math.max(1, rankedMembers[0]?.computedPts || 1)
   const isCommissioner = league?.creator_id === user.id
   const timerColor = timeLeft > 30 ? '#5DCAA5' : timeLeft > 10 ? '#FAC775' : '#F09595'
 
+  // Trigger draft complete popup
+  const prevDraftDoneRef = useRef(false)
+  useEffect(() => {
+    if (draftDone && !prevDraftDoneRef.current && draftStarted) {
+      setDraftComplete(true)
+    }
+    prevDraftDoneRef.current = draftDone
+  }, [draftDone, draftStarted])
+
   return (
     <div>
+      {/* Draft Complete Popup */}
+      {draftComplete && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div style={{ background: 'var(--bg2)', border: '1px solid rgba(29,158,117,.4)', borderRadius: 16, padding: '2rem', maxWidth: 400, width: '100%', textAlign: 'center' }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🏆</div>
+            <h2 style={{ fontSize: 22, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>Draft Complete!</h2>
+            <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: 24 }}>All teams have been drafted. The World Cup starts June 11, 2026. Good luck!</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginBottom: 24 }}>
+              {myPicks.map(n => {
+                const t = TEAM_MAP[n]
+                return (
+                  <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(29,158,117,.1)', border: '1px solid rgba(29,158,117,.3)', borderRadius: 20, padding: '4px 10px', fontSize: 12 }}>
+                    <Flag team={n} size={14} /><span style={{ color: '#5DCAA5' }}>{n}</span>
+                  </div>
+                )
+              })}
+            </div>
+            <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => setDraftComplete(false)}>View my teams →</button>
+          </div>
+        </div>
+      )}
+      {/* Player Detail Modal */}
+      {selectedPlayer && (() => {
+        const p = selectedPlayer
+        const stageBonus = bracket?.stageBonus || {}
+        const STAGE_CSS_MAP = {
+          'Champion':'stage-ch','Runner-up':'stage-ru','Semi-final':'stage-sf',
+          'Quarter-final':'stage-qf','Round of 16':'stage-r16','Round of 32':'stage-r32','Group stage':'stage-gs'
+        }
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setSelectedPlayer(null)}>
+            <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '16px 16px 0 0', padding: '1.5rem', width: '100%', maxWidth: 600, maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '1.5rem' }}>
+                <div className="avatar" style={{ width: 44, height: 44, fontSize: 14, background: AV_BG[p.draft_slot % 8], color: AV_FG[p.draft_slot % 8] }}>
+                  {getDisplayName(p).slice(0, 2).toUpperCase()}
+                </div>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>{getDisplayName(p)}</div>
+                  <div style={{ fontSize: 13, color: 'var(--text2)' }}>{p.computedPts} pts total · {p.teamPicks.length} teams</div>
+                </div>
+                <button onClick={() => setSelectedPlayer(null)} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text2)', fontSize: 20, cursor: 'pointer' }}>×</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 8 }}>
+                {p.teamPicks.map(n => {
+                  const bonus = stageBonus[n] || 0
+                  let stageLabel = 'Group stage'
+                  if (bracket) {
+                    if (bracket.champ?.n === n) stageLabel = 'Champion'
+                    else {
+                      for (const {d, l} of [
+                        {d:bracket.final,l:'Runner-up'},{d:bracket.sf,l:'Semi-final'},
+                        {d:bracket.qf,l:'Quarter-final'},{d:bracket.r16,l:'Round of 16'},
+                        {d:bracket.r32,l:'Round of 32'}
+                      ]) { if (d?.some(m => m.w?.n === n)) { stageLabel = l; break } }
+                    }
+                  }
+                  const teamBreakdown = p.breakdown?.[n]
+                  const matchPts = Math.max(0, (teamBreakdown?.pts || 0) - bonus)
+                  return (
+                    <div key={n} style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Flag team={n} size={20} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{n}</div>
+                        <span className={`badge ${STAGE_CSS_MAP[stageLabel] || 'stage-gs'}`} style={{ fontSize: 10 }}>{stageLabel}</span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', fontFamily: 'var(--mono)' }}>{(teamBreakdown?.pts || 0)} pts</div>
+                        {bonus > 0 && <div style={{ fontSize: 10, color: 'var(--text3)' }}>+{bonus} bonus</div>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {p.teamPicks.length === 0 && <p style={{ textAlign: 'center', color: 'var(--text2)', fontSize: 14, padding: '2rem' }}>No teams drafted yet</p>}
+            </div>
+          </div>
+        )
+      })()}
+
       <div className="app-header">
         <div className="header-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -307,10 +478,10 @@ export default function LeaguePage() {
               {draftDone && <p style={{ fontSize: 14, color: '#5DCAA5', fontWeight: 500 }}>✅ Draft complete!</p>}
             </div>
 
-            <div className="card-title">Leaderboard</div>
+            <div className="card-title">Leaderboard <span style={{fontSize:11,color:'var(--text3)',fontWeight:400,textTransform:'none',letterSpacing:0}}>tap a player to see their teams</span></div>
             <div className="card">
               {rankedMembers.map((m, i) => (
-                <div key={m.id} className="row">
+                <div key={m.id} className="row" onClick={() => setSelectedPlayer(m)} style={{ cursor: 'pointer' }}>
                   <span style={{ fontSize: 13, color: 'var(--text3)', minWidth: 20, fontWeight: 500 }}>{i + 1}</span>
                   <div className="avatar" style={{ background: AV_BG[m.draft_slot % 8], color: AV_FG[m.draft_slot % 8] }}>
                     {getDisplayName(m).slice(0, 2).toUpperCase()}
@@ -330,6 +501,7 @@ export default function LeaguePage() {
                       {m.teamPicks.length > 6 && <span style={{ fontSize: 11, color: 'var(--text3)' }}>+{m.teamPicks.length - 6}</span>}
                     </div>
                   </div>
+                  <span style={{ fontSize: 18, color: 'var(--text3)' }}>›</span>
                 </div>
               ))}
             </div>
@@ -365,18 +537,15 @@ export default function LeaguePage() {
             )}
 
             {/* Last pick made */}
-            {draftStarted && Object.keys(picks).length > 0 && (() => {
-              const allPicksList = Object.entries(picks)
-              const lastEntry = allPicksList[allPicksList.length - 1]
-              if (!lastEntry) return null
-              const [lastTeam, lastUid] = lastEntry
-              const lastMember = members.find(m => m.user_id === lastUid)
-              const lastTeamData = TEAM_MAP[lastTeam]
+            {draftStarted && picksOrdered.length > 0 && (() => {
+              const lastPick = picksOrdered[picksOrdered.length - 1]
+              if (!lastPick) return null
+              const lastMember = members.find(m => m.user_id === lastPick.user_id)
               return (
-                <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', marginBottom: 12, fontSize: 13, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', marginBottom: 12, fontSize: 13, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span>Last pick:</span>
-                  <Flag team={lastTeam} size={14} />
-                  <span style={{ color: 'var(--text)', fontWeight: 500 }}>{lastTeam}</span>
+                  <Flag team={lastPick.team_name} size={14} />
+                  <span style={{ color: 'var(--text)', fontWeight: 500 }}>{lastPick.team_name}</span>
                   <span>by <strong>{getDisplayName(lastMember)}</strong></span>
                 </div>
               )
@@ -435,11 +604,13 @@ export default function LeaguePage() {
                   {TEAMS.filter(t => t.g === group).map(t => {
                     const owner = picks[t.n]
                     const isMine = owner === user.id
-                    const isTaken = owner && !isMine
+                    const isTakenByBot = owner?.startsWith('bot_')
+                    const isTaken = owner && !isMine && !isTakenByBot
+                    const isAnyonePicked = owner && !isMine
                     const ownerMember = isTaken ? members.find(m => m.user_id === owner) : null
-                    const canPick = draftStarted && isMyTurn && !draftDone && !isTaken && !isMine
+                    const canPick = draftStarted && isMyTurn && !draftDone && !owner
                     return (
-                      <div key={t.n} className={`team-card ${isMine ? 'mine' : ''} ${isTaken ? 'taken' : ''}`} onClick={() => canPick && makePick(t.n)} style={{ cursor: canPick ? 'pointer' : isTaken ? 'not-allowed' : 'default' }}>
+                      <div key={t.n} className={`team-card ${isMine ? 'mine' : ''} ${isAnyonePicked ? 'taken' : ''}`} onClick={() => canPick && makePick(t.n)} style={{ cursor: canPick ? 'pointer' : isAnyonePicked ? 'not-allowed' : 'default' }}>
                         {isMine && <div className="pick-check">✓</div>}
                         {isTaken && ownerMember && (
                           <div style={{ position: 'absolute', top: 4, right: 4, width: 15, height: 15, borderRadius: '50%', background: AV_BG[ownerMember.draft_slot % 8], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, fontWeight: 700, color: AV_FG[ownerMember.draft_slot % 8] }}>
