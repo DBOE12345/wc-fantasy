@@ -56,20 +56,59 @@ export function calcMatchPoints(fixture, teamName) {
   const oppGoals = isHome ? awayGoals : homeGoals
 
   let pts = 0
-  if (myGoals > oppGoals) pts += SCORING.win
-  else if (myGoals === oppGoals) pts += SCORING.draw
+  const breakdown = []
 
-  pts += myGoals * SCORING.goal
-  if (myGoals >= 4) pts += SCORING.goalBonus
-  if (oppGoals === 0) pts += SCORING.cleanSheet
+  // Win/Draw/Loss
+  if (myGoals > oppGoals) { pts += SCORING.win; breakdown.push({ label: 'Win', pts: SCORING.win }) }
+  else if (myGoals === oppGoals) { pts += SCORING.draw; breakdown.push({ label: 'Draw', pts: SCORING.draw }) }
+
+  // Goals scored
+  if (myGoals > 0) {
+    pts += myGoals * SCORING.goal
+    breakdown.push({ label: `${myGoals} goal${myGoals > 1 ? 's' : ''} scored`, pts: myGoals * SCORING.goal })
+  }
+
+  // Goal bonus
+  if (myGoals >= 4) {
+    pts += SCORING.goalBonus
+    breakdown.push({ label: '4+ goal bonus', pts: SCORING.goalBonus })
+  }
+
+  // Clean sheet
+  if (oppGoals === 0) {
+    pts += SCORING.cleanSheet
+    breakdown.push({ label: 'Clean sheet', pts: SCORING.cleanSheet })
+  }
+
+  // Red cards (from events if available)
+  const events = fixture.events || []
+  const myTeamId = isHome ? fixture.teams?.home?.id : fixture.teams?.away?.id
+  const redCards = events.filter(e =>
+    e.team?.id === myTeamId && (e.detail === 'Red Card' || e.detail === 'Second Yellow Card')
+  ).length
+  if (redCards > 0) {
+    pts += redCards * SCORING.redCard
+    breakdown.push({ label: `${redCards} red card${redCards > 1 ? 's' : ''}`, pts: redCards * SCORING.redCard })
+  }
+
+  // Own goals (against us — scored by our team into own net)
+  const ownGoals = events.filter(e =>
+    e.team?.id === myTeamId && e.detail === 'Own Goal'
+  ).length
+  if (ownGoals > 0) {
+    pts += ownGoals * SCORING.ownGoal
+    breakdown.push({ label: `${ownGoals} own goal${ownGoals > 1 ? 's' : ''}`, pts: ownGoals * SCORING.ownGoal })
+  }
 
   return {
     pts,
+    breakdown,
     goals: myGoals,
     conceded: oppGoals,
     result: myGoals > oppGoals ? 'W' : myGoals === oppGoals ? 'D' : 'L',
     opponent: isHome ? away : home,
-    fixture: fixture.fixture?.date,
+    date: fixture.fixture?.date,
+    round: fixture.league?.round,
   }
 }
 

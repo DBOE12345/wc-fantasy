@@ -18,6 +18,8 @@ export default function HowToPlayPage() {
     { label: 'Goal scored', pts: '+1 pt', desc: 'Per goal your team scores' },
     { label: '4+ goals', pts: '+2 pts', desc: 'Bonus for 4 or more goals in one match' },
     { label: 'Clean sheet', pts: '+3 pts', desc: 'Team keeps a clean sheet (0 goals conceded)' },
+    { label: 'Own goal', pts: '-1 pt', desc: 'Per own goal scored by your team', neg: true },
+    { label: 'Red card', pts: '-2 pts', desc: 'Per red card received by your team', neg: true },
     { label: 'Round of 32', pts: '+5 pts', desc: 'Team advances to knockout stage' },
     { label: 'Round of 16', pts: '+8 pts', desc: 'Team advances to round of 16' },
     { label: 'Quarter-final', pts: '+12 pts', desc: 'Team reaches quarter-final' },
@@ -75,7 +77,7 @@ export default function HowToPlayPage() {
                     <div style={{ fontWeight: 600 }}>{s.label}</div>
                     <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{s.desc}</div>
                   </td>
-                  <td style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 700, color: 'var(--clay-light)' }}>{s.pts}</td>
+                  <td style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', textAlign: 'right', fontFamily: 'var(--mono)', fontWeight: 700, color: s.neg ? '#F09595' : 'var(--clay-light)' }}>{s.pts}</td>
                 </tr>
               ))}
             </tbody>

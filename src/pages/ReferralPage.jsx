@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { TIERS, getTier, getNextTier } from '../lib/tiers'
 import { useAuth } from '../hooks/useAuth'
 import { DubUpLogoHorizontal } from '../components/DubUpLogo'
 
@@ -109,6 +110,13 @@ export default function ReferralPage() {
                 <span style={{ fontSize: 14, color: 'var(--text2)' }}>friends signed up</span>
               </div>
               {myRank && <div style={{ fontSize: 12, color: 'var(--clay-light)', marginTop: 4 }}>#{myRank} on the leaderboard</div>}
+              {(() => {
+                const tier = getTier(myReferrals)
+                const next = getNextTier(myReferrals)
+                if (tier) return <div style={{ fontSize: 12, color: tier.color, fontWeight: 700, marginTop: 4 }}>{tier.emoji} {tier.label}</div>
+                if (next) return <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{myReferrals}/{next.minReferrals} to {next.label}</div>
+                return null
+              })()}
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4, fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>Your code</div>
@@ -131,6 +139,81 @@ export default function ReferralPage() {
           </div>
         </div>
 
+        {/* Tier Status */}
+        {(() => {
+          const currentTier = getTier(myReferrals)
+          const nextTier = getNextTier(myReferrals)
+          return (
+            <div style={{ marginBottom: '1.5rem' }}>
+              <div className="card-title">Your Dubber Status</div>
+
+              {/* Current tier */}
+              {currentTier ? (
+                <div style={{ background: currentTier.bg, border: `1px solid ${currentTier.border}`, borderRadius: 14, padding: '1rem 1.1rem', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ fontSize: 36 }}>{currentTier.emoji}</div>
+                    <div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 18, color: currentTier.color, textTransform: 'uppercase', letterSpacing: '.04em' }}>{currentTier.label}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>Achieved at {currentTier.minReferrals} referrals</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${currentTier.border}` }}>
+                    <div style={{ fontSize: 11, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>Your perks</div>
+                    {currentTier.perks.map((p, i) => (
+                      <div key={i} style={{ fontSize: 12, color: 'var(--text2)', padding: '3px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: currentTier.color }}>✓</span> {p}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: '1rem', marginBottom: 10, textAlign: 'center' }}>
+                  <div style={{ fontSize: 24, marginBottom: 6 }}>🏅</div>
+                  <div style={{ fontSize: 14, color: 'var(--text2)', fontWeight: 600 }}>No tier yet</div>
+                  <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 3 }}>Refer 20 friends to earn Bronze Dubber status</div>
+                </div>
+              )}
+
+              {/* Progress to next tier */}
+              {nextTier && (
+                <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600 }}>Next: {nextTier.emoji} {nextTier.label}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text3)' }}>{myReferrals}/{nextTier.minReferrals}</div>
+                  </div>
+                  <div style={{ height: 6, background: 'var(--bg3)', borderRadius: 99, overflow: 'hidden', marginBottom: 8 }}>
+                    <div style={{ height: 6, width: `${Math.min(100, (myReferrals / nextTier.minReferrals) * 100)}%`, background: `linear-gradient(90deg, var(--clay), ${nextTier.color})`, borderRadius: 99, transition: 'width .4s ease' }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)' }}>{nextTier.minReferrals - myReferrals} more referral{nextTier.minReferrals - myReferrals !== 1 ? 's' : ''} needed</div>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+
+        {/* All tiers overview */}
+        <div style={{ marginBottom: '1.5rem' }}>
+          <div className="card-title">Dubber Tiers</div>
+          {TIERS.slice().reverse().map(tier => {
+            const unlocked = myReferrals >= tier.minReferrals
+            return (
+              <div key={tier.id} style={{ background: unlocked ? tier.bg : 'var(--bg2)', border: `1px solid ${unlocked ? tier.border : 'var(--border)'}`, borderRadius: 12, padding: '12px 14px', marginBottom: 8, opacity: unlocked ? 1 : 0.55, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontSize: 28, flexShrink: 0 }}>{tier.emoji}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: unlocked ? tier.color : 'var(--text)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{tier.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{tier.minReferrals}+ referrals required</div>
+                </div>
+                <div style={{ flexShrink: 0 }}>
+                  {unlocked
+                    ? <span style={{ fontSize: 11, background: tier.bg, color: tier.color, border: `1px solid ${tier.border}`, borderRadius: 5, padding: '2px 8px', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>Unlocked</span>
+                    : <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-display)', fontWeight: 700 }}>{tier.minReferrals - myReferrals} to go</span>
+                  }
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
         {/* How it works */}
         <div className="card" style={{ marginBottom: '1.5rem' }}>
           <div className="card-title">How it works</div>
@@ -145,6 +228,48 @@ export default function ReferralPage() {
               <div style={{ fontSize: 13, color: 'var(--text2)', paddingTop: 3, lineHeight: 1.5 }}>{item.text}</div>
             </div>
           ))}
+        </div>
+
+        {/* Tier system */}
+        <div className="card-title">Dubber Tiers — Earn Your Badge</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: '1.5rem' }}>
+          {TIERS.slice().reverse().map(t => {
+            const earned = myReferrals >= t.minReferrals
+            const isCurrent = getTier(myReferrals)?.id === t.id
+            const progress = Math.min(100, (myReferrals / t.minReferrals) * 100)
+            return (
+              <div key={t.id} style={{ background: earned ? t.bg : 'var(--bg2)', border: `1px solid ${earned ? t.border : 'var(--border)'}`, borderRadius: 12, padding: '14px 16px', opacity: earned ? 1 : 0.65, transition: 'all .2s' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: earned ? 0 : 8 }}>
+                  <span style={{ fontSize: 26 }}>{t.emoji}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 15, color: earned ? t.color : 'var(--text)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{t.label}</span>
+                      {isCurrent && <span style={{ fontSize: 10, background: t.bg, border: `1px solid ${t.border}`, color: t.color, borderRadius: 4, padding: '1px 7px', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>Your tier</span>}
+                      {earned && !isCurrent && <span style={{ fontSize: 10, color: t.color, fontFamily: 'var(--font-display)', fontWeight: 700 }}>✓ Earned</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>{t.minReferrals} referrals required</div>
+                  </div>
+                </div>
+                {/* Perks */}
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {t.perks.map((perk, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: earned ? t.color : 'var(--text3)' }}>
+                      <span style={{ fontSize: 10 }}>{earned ? '✓' : '○'}</span>{perk}
+                    </div>
+                  ))}
+                </div>
+                {/* Progress bar if not earned */}
+                {!earned && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ height: 3, background: 'var(--bg3)', borderRadius: 99, overflow: 'hidden' }}>
+                      <div style={{ height: 3, width: `${progress}%`, background: `linear-gradient(90deg, var(--clay), ${t.color})`, borderRadius: 99 }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>{myReferrals}/{t.minReferrals} — {t.minReferrals - myReferrals} more to go</div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
 
         {/* Global leaderboard */}
@@ -169,6 +294,7 @@ export default function ReferralPage() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: isMe ? 'var(--clay-light)' : 'var(--text)', textTransform: 'uppercase', letterSpacing: '.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {entry.username || 'Player'} {isMe && <span style={{ fontSize: 10, color: 'var(--text3)' }}>(you)</span>}
+                      {(() => { const tier = getTier(entry.referral_count || 0); return tier ? <span style={{ fontSize: 9, background: tier.bg, border: `1px solid ${tier.border}`, color: tier.color, borderRadius: 3, padding: '1px 5px', marginLeft: 4, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{tier.emoji} {tier.id}</span> : null })()}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

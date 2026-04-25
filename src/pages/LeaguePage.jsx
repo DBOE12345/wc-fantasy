@@ -3,10 +3,31 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { TEAMS, TEAM_MAP, SCORING, STAGE_LABELS } from '../lib/teams'
-import { fetchLiveFixtures } from '../lib/api'
+import { getTier, getNextTier, TIERS, getTierBadge } from '../lib/tiers'
+
+// Small inline tier badge
+function TierBadge({ referralCount, size = 13 }) {
+  const tier = getTier(referralCount || 0)
+  if (!tier) return null
+  return (
+    <span
+      title={tier.label}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: tier.bg, border: `1px solid ${tier.border}`,
+        borderRadius: 4, padding: '1px 5px', marginLeft: 5,
+        fontSize: size - 2, fontFamily: 'var(--font-display)', fontWeight: 700,
+        color: tier.color, textTransform: 'uppercase', letterSpacing: '.04em',
+        verticalAlign: 'middle', lineHeight: 1.4, flexShrink: 0,
+      }}
+    >
+      {tier.emoji} {tier.id}
+    </span>
+  )
+}
 import { snakeOrder } from '../lib/draft'
 import { simulateBracket } from '../lib/bracket'
-import { fetchFixtures, calcTotalPoints } from '../lib/api'
+import { fetchFixtures, fetchLiveFixtures, calcTotalPoints } from '../lib/api'
 import Flag from '../components/Flag'
 import DubUpLogo, { DubUpLogoHorizontal } from '../components/DubUpLogo'
 
@@ -146,6 +167,7 @@ export default function LeaguePage() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [myProfile, setMyProfile] = useState(null)
   const [draftSettingsOpen, setDraftSettingsOpen] = useState(false)
+  const [selectedTeam, setSelectedTeam] = useState(null)
   const [liveScores, setLiveScores] = useState([])
   const [liveScoresLoading, setLiveScoresLoading] = useState(false)
   const [manualOrder, setManualOrder] = useState([])
@@ -179,7 +201,7 @@ export default function LeaguePage() {
     // Try to get profiles separately
     const memsWithProfiles = await Promise.all((mems || []).map(async m => {
       const { data: profile } = await supabase
-        .from('profiles').select('username, email').eq('id', m.user_id).single()
+        .from('profiles').select('username, email, avatar_url, referral_count').eq('id', m.user_id).single()
       return { ...m, profiles: profile || null }
     }))
     
@@ -220,8 +242,19 @@ export default function LeaguePage() {
     setChatMessages(msgs || [])
 
     // Load my profile for avatar
-    const { data: profileData } = await supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single()
+    const { data: profileData } = await supabase.from('profiles').select('username, avatar_url, referral_count').eq('id', user.id).single()
     if (profileData) setMyProfile(profileData)
+
+    // Load real match fixtures (goes live June 11 2026)
+    const wcStart = new Date('2026-06-11T00:00:00Z')
+    if (new Date() >= wcStart) {
+      try {
+        const fixtureData = await fetchFixtures()
+        setFixtures(fixtureData)
+      } catch(e) {
+        console.error('Could not load fixtures:', e)
+      }
+    }
 
     setLoading(false)
   }, [id, user.id, navigate])
@@ -660,7 +693,7 @@ export default function LeaguePage() {
                   {getDisplayName(p).slice(0, 2).toUpperCase()}
                 </div>
                 <div>
-                  <div style={{ fontSize: 18, fontWeight: 900, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: ".02em", color: 'var(--text)' }}>{getDisplayName(p)}</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: ".02em", color: 'var(--text)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>{getDisplayName(p)}<TierBadge referralCount={p.profile?.referral_count} size={14} /></div>
                   <div style={{ fontSize: 13, color: 'var(--text2)' }}>{p.computedPts} pts total · {p.teamPicks.length} teams</div>
                 </div>
                 <button onClick={() => setSelectedPlayer(null)} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--text2)', fontSize: 20, cursor: 'pointer' }}>×</button>
@@ -732,8 +765,9 @@ export default function LeaguePage() {
           <div style={{ position: 'absolute', top: 70, right: 12, background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 14, padding: '8px 0', minWidth: 220, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
             {/* User info */}
             <div style={{ padding: '10px 16px 12px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--text)', textTransform: 'uppercase' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--text)', textTransform: 'uppercase' }}>
                 {getDisplayName(members.find(m => m.user_id === user.id))}
+                <TierBadge referralCount={myProfile?.referral_count} />
               </div>
               <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>{user?.email}</div>
             </div>
@@ -837,6 +871,7 @@ export default function LeaguePage() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                       <span style={{ fontWeight: 500, fontSize: 14 }}>
                         {getDisplayName(m)} {m.user_id === user.id && <span style={{ fontSize: 11, color: 'var(--text3)' }}>(you)</span>}
+                        <TierBadge referralCount={m.profile?.referral_count} />
                       </span>
                       <span style={{ fontWeight: 600, fontSize: 15 }}>{m.computedPts} pts</span>
                     </div>
@@ -852,6 +887,64 @@ export default function LeaguePage() {
                 </div>
               ))}
             </div>
+
+            {/* Referral Promo Widget */}
+            {(() => {
+              const nextTier = getNextTier(myProfile?.referral_count || 0)
+              const currentTier = getTier(myProfile?.referral_count || 0)
+              const count = myProfile?.referral_count || 0
+              return (
+                <div style={{ background: 'linear-gradient(135deg, rgba(193,73,46,.1), rgba(200,169,106,.06))', border: '1px solid var(--border-clay)', borderRadius: 14, padding: '1rem 1.1rem', marginTop: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 14, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text)', marginBottom: 2 }}>
+                        🌍 Refer Friends
+                      </div>
+                      {currentTier ? (
+                        <div style={{ fontSize: 12, color: currentTier.color, fontWeight: 600 }}>
+                          {currentTier.emoji} {currentTier.label}
+                        </div>
+                      ) : nextTier ? (
+                        <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+                          {count}/{nextTier.minReferrals} to {nextTier.label}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12, color: 'var(--text2)' }}>Earn badges by inviting friends</div>
+                      )}
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      style={{ fontSize: 12, padding: '8px 14px', flexShrink: 0 }}
+                      onClick={() => navigate('/referral')}
+                    >
+                      Invite →
+                    </button>
+                  </div>
+                  {/* Progress bar to next tier */}
+                  {nextTier && (
+                    <div>
+                      <div style={{ height: 4, background: 'var(--bg3)', borderRadius: 99, overflow: 'hidden' }}>
+                        <div style={{ height: 4, width: `${Math.min(100, (count / nextTier.minReferrals) * 100)}%`, background: `linear-gradient(90deg, var(--clay), ${nextTier.color})`, borderRadius: 99, transition: 'width .4s ease' }} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                        <span>{count} referrals</span>
+                        <span>{nextTier.emoji} {nextTier.minReferrals} for {nextTier.label}</span>
+                      </div>
+                    </div>
+                  )}
+                  {/* Tier badges preview */}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                    {TIERS.slice().reverse().map(t => (
+                      <div key={t.id} style={{ flex: 1, background: count >= t.minReferrals ? t.bg : 'var(--bg3)', border: `1px solid ${count >= t.minReferrals ? t.border : 'var(--border)'}`, borderRadius: 8, padding: '6px 4px', textAlign: 'center', opacity: count >= t.minReferrals ? 1 : 0.4 }}>
+                        <div style={{ fontSize: 16 }}>{t.emoji}</div>
+                        <div style={{ fontSize: 9, fontFamily: 'var(--font-display)', fontWeight: 700, color: count >= t.minReferrals ? t.color : 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.04em', marginTop: 2 }}>{t.id}</div>
+                        <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 1 }}>{t.minReferrals}+</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* Live Scores Widget — shows after WC starts June 11 2026 */}
             {draftDone && (() => {
@@ -1205,49 +1298,132 @@ export default function LeaguePage() {
                 <div className="empty"><div className="empty-icon">🏳️</div><p>No picks yet</p></div>
               ) : (
                 <>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', marginBottom: '1.5rem', gap: 6 }}>
-                    {displayPicks.map(n => (
-                      <div key={n} className="team-tag">
-                        <Flag team={n} size={16} />
-                        <span style={{ marginLeft: 4 }}>{n}</span>
+                  {/* Team breakdown modal */}
+                  {selectedTeam && (() => {
+                    const stageBonus = bracket?.stageBonus || {}
+                    const bonus = stageBonus[selectedTeam] || 0
+                    const breakdown = displayMember?.breakdown?.[selectedTeam]
+                    const matches = breakdown?.matches || []
+                    let stageLabel = 'Group stage'
+                    if (bracket) {
+                      if (bracket.champ?.n === selectedTeam) stageLabel = 'Champion'
+                      else {
+                        for (const { d, l } of [
+                          { d: bracket.final, l: 'Runner-up' },
+                          { d: bracket.sf, l: 'Semi-final' },
+                          { d: bracket.qf, l: 'Quarter-final' },
+                          { d: bracket.r16, l: 'Round of 16' },
+                          { d: bracket.r32, l: 'Round of 32' },
+                        ]) { if (d?.some(m => m.w?.n === selectedTeam)) { stageLabel = l; break } }
+                      }
+                    }
+                    return (
+                      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 500, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setSelectedTeam(null)}>
+                        <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '16px 16px 0 0', padding: '1.5rem', width: '100%', maxWidth: 600, maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <Flag team={selectedTeam} size={24} />
+                              <div>
+                                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 18, textTransform: 'uppercase', letterSpacing: '.04em' }}>{selectedTeam}</div>
+                                <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{breakdown?.pts || 0} pts total</div>
+                              </div>
+                            </div>
+                            <button onClick={() => setSelectedTeam(null)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 24, cursor: 'pointer' }}>×</button>
+                          </div>
+
+                          {/* Match breakdown */}
+                          {matches.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '1.5rem 0', color: 'var(--text2)', fontSize: 14 }}>
+                              {new Date() < new Date('2026-06-11T00:00:00Z')
+                                ? '⏳ Match data available from June 11, 2026'
+                                : 'No matches played yet'}
+                            </div>
+                          ) : (
+                            <>
+                              <div className="card-title">Match Results</div>
+                              {matches.map((match, i) => (
+                                <div key={i} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                    <div>
+                                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                                        <span style={{ color: match.result === 'W' ? '#5DCAA5' : match.result === 'D' ? '#FAC775' : '#F09595', fontFamily: 'var(--font-display)', fontWeight: 700, marginRight: 8 }}>{match.result}</span>
+                                        vs {match.opponent}
+                                      </div>
+                                      <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{match.round || ''}</div>
+                                    </div>
+                                    <div style={{ fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 15, color: match.pts >= 0 ? 'var(--text)' : '#F09595' }}>
+                                      {match.pts > 0 ? '+' : ''}{match.pts} pts
+                                    </div>
+                                  </div>
+                                  {/* Per-event breakdown */}
+                                  {match.breakdown?.map((ev, j) => (
+                                    <div key={j} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text3)', padding: '2px 8px' }}>
+                                      <span>{ev.label}</span>
+                                      <span style={{ fontFamily: 'var(--mono)', color: ev.pts < 0 ? '#F09595' : 'var(--text3)' }}>{ev.pts > 0 ? '+' : ''}{ev.pts}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ))}
+                            </>
+                          )}
+
+                          {/* Stage bonus */}
+                          {bonus > 0 && (
+                            <div style={{ marginTop: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 600 }}>Tournament advancement</div>
+                                  <div style={{ marginTop: 3 }}><span className={`badge ${STAGE_CSS[stageLabel] || 'stage-gs'}`}>{stageLabel}</span></div>
+                                </div>
+                                <div style={{ fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 15, color: 'var(--clay-light)' }}>+{bonus} pts</div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Total */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, paddingTop: 12, borderTop: '2px solid var(--border2)' }}>
+                            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text2)' }}>Total</div>
+                            <div style={{ fontFamily: 'var(--mono)', fontWeight: 900, fontSize: 22, color: 'var(--text)' }}>{breakdown?.pts || 0} pts</div>
+                          </div>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                  <div className="card-title">Points breakdown</div>
-                  <div className="card">
-                    <table className="pts-table">
-                      <thead><tr><th>Team</th><th>Stage</th><th>Match pts</th><th>Bonus</th><th>Total</th></tr></thead>
-                      <tbody>
-                        {displayPicks.map(n => {
-                          const stageBonus = bracket?.stageBonus || {}
-                          const bonus = stageBonus[n] || 0
-                          let stageLabel = 'Group stage'
-                          if (bracket) {
-                            if (bracket.champ?.n === n) stageLabel = 'Champion'
-                            else {
-                              for (const { d, l } of [
-                                { d: bracket.final, l: 'Runner-up' },
-                                { d: bracket.sf, l: 'Semi-final' },
-                                { d: bracket.qf, l: 'Quarter-final' },
-                                { d: bracket.r16, l: 'Round of 16' },
-                                { d: bracket.r32, l: 'Round of 32' },
-                              ]) { if (d?.some(m => m.w?.n === n)) { stageLabel = l; break } }
-                            }
-                          }
-                          const breakdown = displayMember?.breakdown?.[n]
-                          const matchPts = Math.max(0, (breakdown?.pts || 0) - bonus)
-                          return (
-                            <tr key={n}>
-                              <td><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Flag team={n} size={16} />{n}</div></td>
-                              <td><span className={`badge ${STAGE_CSS[stageLabel] || 'stage-gs'}`}>{stageLabel}</span></td>
-                              <td style={{ fontFamily: 'var(--mono)' }}>{matchPts > 0 ? `+${matchPts}` : '—'}</td>
-                              <td style={{ fontFamily: 'var(--mono)' }}>{bonus > 0 ? `+${bonus}` : '—'}</td>
-                              <td style={{ fontWeight: 600, fontFamily: 'var(--mono)' }}>{breakdown?.pts || 0}</td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
+                    )
+                  })()}
+
+                  {/* Team cards — tap to see breakdown */}
+                  <div className="card-title">Tap a team for point breakdown</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: '1.5rem' }}>
+                    {displayPicks.map(n => {
+                      const stageBonus = bracket?.stageBonus || {}
+                      const bonus = stageBonus[n] || 0
+                      const breakdown = displayMember?.breakdown?.[n]
+                      const totalPts = breakdown?.pts || 0
+                      let stageLabel = 'Group stage'
+                      if (bracket) {
+                        if (bracket.champ?.n === n) stageLabel = 'Champion'
+                        else {
+                          for (const { d, l } of [
+                            { d: bracket.final, l: 'Runner-up' },
+                            { d: bracket.sf, l: 'Semi-final' },
+                            { d: bracket.qf, l: 'Quarter-final' },
+                            { d: bracket.r16, l: 'Round of 16' },
+                            { d: bracket.r32, l: 'Round of 32' },
+                          ]) { if (d?.some(m => m.w?.n === n)) { stageLabel = l; break } }
+                        }
+                      }
+                      return (
+                        <div key={n} onClick={() => setSelectedTeam(n)} style={{ background: 'var(--bg2)', border: `1px solid ${selectedTeam === n ? 'var(--clay)' : 'var(--border)'}`, borderRadius: 10, padding: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <Flag team={n} size={22} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
+                              <span className={`badge ${STAGE_CSS[stageLabel] || 'stage-gs'}`} style={{ fontSize: 9, padding: '1px 5px' }}>{stageLabel}</span>
+                            </div>
+                          </div>
+                          <div style={{ fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 15, color: 'var(--clay-light)', flexShrink: 0 }}>{totalPts}</div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </>
               )}

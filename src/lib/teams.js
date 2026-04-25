@@ -66,6 +66,7 @@ export const TEAM_MAP = Object.fromEntries(TEAMS.map(t => [t.n, t]))
 export const SCORING = {
   win: 5, draw: 2, loss: 0,
   goal: 1, goalBonus: 2, cleanSheet: 3,
+  redCard: -2, ownGoal: -1,
   r32: 5, r16: 8, qf: 12, sf: 20, ru: 30, ch: 40,
 }
 

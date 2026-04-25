@@ -15,6 +15,9 @@ export default function AuthPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  const [otpSent, setOtpSent] = useState(false)
+  const [otpCode, setOtpCode] = useState('')
+  const [pendingEmail, setPendingEmail] = useState('')
   const [refCode, setRefCode] = useState(() => {
     // Read referral code from URL params
     const params = new URLSearchParams(window.location.search)
@@ -46,19 +49,80 @@ export default function AuthPage() {
         else {
           // Track referral if code was used
           if (refCode && data?.user) {
-            // Find referrer and increment their count
             const { data: referrer } = await supabase
               .from('profiles').select('id, referral_count').eq('referral_code', refCode.toUpperCase()).single()
             if (referrer) {
               await supabase.from('profiles').update({ referral_count: (referrer.referral_count || 0) + 1 }).eq('id', referrer.id)
             }
           }
-          setSuccess('Account created! Check your email to confirm, then log in.')
+          // Show OTP verification screen
+          setPendingEmail(email)
+          setOtpSent(true)
         }
       }
     } finally {
       setLoading(false)
     }
+  }
+
+  async function verifyOtp() {
+    if (!otpCode || otpCode.length < 6) { setError('Enter the 6-digit code from your email'); return }
+    setLoading(true); setError('')
+    const { error } = await supabase.auth.verifyOtp({
+      email: pendingEmail,
+      token: otpCode,
+      type: 'signup',
+    })
+    setLoading(false)
+    if (error) setError(error.message)
+    else {
+      setOtpSent(false)
+      setSuccess('Email verified! You can now sign in.')
+      setMode('login')
+    }
+  }
+
+  // OTP verification screen
+  if (otpSent) {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card">
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+            <DubUpLogoLarge size={140} />
+          </div>
+          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>📧</div>
+            <div className="auth-title" style={{ fontSize: 18 }}>Check your email</div>
+            <div className="auth-sub">We sent a 6-digit code to<br/><strong style={{ color: 'var(--text)' }}>{pendingEmail}</strong></div>
+          </div>
+          {error && <div className="error-msg">{error}</div>}
+          <div className="form-group">
+            <label className="form-label">Verification code</label>
+            <input
+              className="input"
+              type="number"
+              placeholder="000000"
+              value={otpCode}
+              onChange={e => setOtpCode(e.target.value.slice(0, 6))}
+              style={{ textAlign: 'center', letterSpacing: '.3em', fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 700 }}
+              autoFocus
+            />
+          </div>
+          <button className="btn btn-primary" style={{ width: '100%', marginBottom: 12 }} onClick={verifyOtp} disabled={loading || otpCode.length < 6}>
+            {loading ? 'Verifying...' : 'Verify Email →'}
+          </button>
+          <button className="btn btn-secondary" style={{ width: '100%', fontSize: 13 }} onClick={async () => {
+            await supabase.auth.resend({ type: 'signup', email: pendingEmail })
+            setError(''); setSuccess('New code sent!')
+          }}>
+            Resend code
+          </button>
+          <div style={{ textAlign: 'center', marginTop: 12 }}>
+            <span onClick={() => setOtpSent(false)} style={{ fontSize: 13, color: 'var(--text3)', cursor: 'pointer' }}>← Back to sign up</span>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
