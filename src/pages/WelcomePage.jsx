@@ -47,7 +47,7 @@ export default function WelcomePage() {
 
         {/* Big DU logo */}
         <div style={{ marginBottom: 8 }}>
-          <img src={stackedImg} alt="DubUp Fantasy" style={{ width: "min(380px, calc(100vw - 40px))", height: "auto", objectFit: "contain" }} />
+          <img src={stackedImg} alt="DubUp Fantasy" style={{ width: 'min(300px, 75vw)', height: 'auto', objectFit: 'contain' }} />
         </div>
 
         {/* Tagline */}
@@ -144,7 +144,7 @@ export default function WelcomePage() {
           >
             {/* Menu header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
-              <img src={stackedImg} alt="DubUp Fantasy" style={{ width: "min(380px, calc(100vw - 40px))", height: "auto", objectFit: "contain" }} />
+              <img src={stackedImg} alt="DubUp Fantasy" style={{ width: 'min(300px, 75vw)', height: 'auto', objectFit: 'contain' }} />
               <div>
                 <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 18, textTransform: 'uppercase', letterSpacing: '.04em' }}>
                   <span style={{ color: 'var(--clay)' }}>DUB</span>UP

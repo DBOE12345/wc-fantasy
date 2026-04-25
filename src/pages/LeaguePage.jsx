@@ -125,7 +125,7 @@ function getTurn(draftPos, leagueSize) {
 
 export default function LeaguePage() {
   const { id } = useParams()
-  const { user } = useAuth()
+  const { user, signOut } = useAuth()
   const navigate = useNavigate()
 
   const [league, setLeague] = useState(null)
@@ -142,6 +142,8 @@ export default function LeaguePage() {
   const [picksOrdered, setPicksOrdered] = useState([])
   const [draftComplete, setDraftComplete] = useState(false)
   const [selectedPlayer, setSelectedPlayer] = useState(null)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [myProfile, setMyProfile] = useState(null)
   const [viewingPlayer, setViewingPlayer] = useState(null) // for My Teams dropdown
   const [chatMessages, setChatMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
@@ -211,6 +213,10 @@ export default function LeaguePage() {
       .order('created_at')
       .limit(50)
     setChatMessages(msgs || [])
+
+    // Load my profile for avatar
+    const { data: profileData } = await supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single()
+    if (profileData) setMyProfile(profileData)
 
     setLoading(false)
   }, [id, user.id, navigate])
@@ -621,23 +627,60 @@ export default function LeaguePage() {
 
       <div className="app-header">
         <div className="header-inner">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button className="btn btn-ghost" onClick={() => navigate('/')} style={{ padding: '6px 8px', fontSize: 18 }}>←</button>
-            <DubUpLogoHorizontal height={56} />
-            <span style={{ color: 'var(--text3)', fontSize: 13 }}>·</span>
-            <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '.04em', fontFamily: 'var(--font-display)' }}>{league?.name}</span>
-          </div>
+          {/* Left: back + logo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button className="btn btn-ghost" onClick={() => navigate('/profile')} style={{ padding: '6px 8px' }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-              </svg>
-            </button>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text3)', letterSpacing: '.1em' }}>{league?.code}</span>
-            <button className="btn btn-ghost" onClick={copyCode}>{copied ? '✓' : 'Copy'}</button>
+            <button onClick={() => navigate('/')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: 'var(--text2)', fontSize: 20, lineHeight: 1 }}>←</button>
+            <DubUpLogoHorizontal height={36} />
           </div>
+          {/* Center: league name */}
+          <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '.06em', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {league?.name}
+          </div>
+          {/* Right: profile avatar */}
+          <button
+            onClick={() => setProfileMenuOpen(v => !v)}
+            style={{ width: 36, height: 36, borderRadius: '50%', background: myProfile?.avatar_url ? 'transparent' : 'var(--clay)', border: '2px solid var(--border2)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', overflow: 'hidden', flexShrink: 0, fontSize: 13, fontWeight: 700, color: 'var(--sand)', fontFamily: 'var(--font-display)' }}
+          >
+            {myProfile?.avatar_url
+              ? <img src={myProfile.avatar_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : (getDisplayName(members.find(m => m.user_id === user.id)) || 'Me').slice(0,2).toUpperCase()
+            }
+          </button>
         </div>
       </div>
+
+      {/* Profile dropdown menu */}
+      {profileMenuOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200 }} onClick={() => setProfileMenuOpen(false)}>
+          <div style={{ position: 'absolute', top: 70, right: 12, background: 'var(--bg2)', border: '1px solid var(--border2)', borderRadius: 14, padding: '8px 0', minWidth: 220, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
+            {/* User info */}
+            <div style={{ padding: '10px 16px 12px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--text)', textTransform: 'uppercase' }}>
+                {getDisplayName(members.find(m => m.user_id === user.id))}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>{user?.email}</div>
+            </div>
+            {/* League code */}
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>League Code</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 18, fontWeight: 700, color: 'var(--clay-light)', letterSpacing: '.15em' }}>{league?.code}</span>
+                <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => { copyCode(); setProfileMenuOpen(false) }}>{copied ? '✓ Copied' : 'Copy'}</button>
+              </div>
+            </div>
+            {/* Menu items */}
+            {[
+              { label: 'Edit Profile', icon: '👤', action: () => { navigate('/profile'); setProfileMenuOpen(false) } },
+              { label: 'How to Play', icon: '📖', action: () => { navigate('/how-to-play'); setProfileMenuOpen(false) } },
+              { label: 'Sign Out', icon: '🚪', action: () => { signOut(); setProfileMenuOpen(false) }, danger: true },
+            ].map(item => (
+              <button key={item.label} onClick={item.action} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: item.danger ? '#FF9090' : 'var(--text)', textAlign: 'left', fontFamily: 'var(--font)' }}>
+                <span>{item.icon}</span>{item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="container page-wrap" style={{ paddingLeft: 'max(1rem, env(safe-area-inset-left))', paddingRight: 'max(1rem, env(safe-area-inset-right))' }}>
 
@@ -772,21 +815,28 @@ export default function LeaguePage() {
                     className="btn btn-secondary"
                     style={{ fontSize: 12, padding: '8px 14px' }}
                     onClick={async () => {
-                      if (!window.confirm('Reverse the last pick? That team will return to the pool and it will be their turn again.')) return
+                      if (!window.confirm('Reverse the last pick? That team returns to the pool and it becomes their turn again.')) return
                       // Get the very last pick
-                      const { data: lastPick } = await supabase
+                      const { data: lastPick, error: fetchErr } = await supabase
                         .from('picks').select('id, user_id, team_name')
                         .eq('league_id', id)
                         .order('picked_at', { ascending: false })
                         .limit(1).single()
-                      if (!lastPick) { alert('No picks to reverse'); return }
-                      // Delete the pick — team returns to pool
-                      const { error } = await supabase.from('picks').delete().eq('id', lastPick.id)
-                      if (error) { alert('Error reversing pick'); return }
-                      // Step back draft_pos by 1 so it's that player's turn again
+                      if (fetchErr || !lastPick) { alert('No picks to reverse'); return }
+                      // Step 1: delete the pick from DB
+                      const { error: delErr } = await supabase.from('picks').delete().eq('id', lastPick.id)
+                      if (delErr) { alert('Error: ' + delErr.message); return }
+                      // Step 2: remove from local state immediately
+                      setPicks(prev => {
+                        const next = { ...prev }
+                        delete next[lastPick.team_name]
+                        return next
+                      })
+                      setPicksOrdered(prev => prev.filter(p => p.id !== lastPick.id && p.team_name !== lastPick.team_name))
+                      // Step 3: go back 1 draft position
                       const newPos = Math.max(0, (league?.draft_pos || 1) - 1)
                       await supabase.from('leagues').update({ draft_pos: newPos }).eq('id', id)
-                      // Real-time will sync all clients automatically via subscription
+                      // Real-time will sync other clients via DELETE subscription
                     }}
                   >
                     ↩ Reverse last pick
@@ -1012,7 +1062,19 @@ export default function LeaguePage() {
         {tab === 'bracket' && (
           <>
             <h2 style={{ fontSize: 20, fontWeight: 900, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: ".02em", marginBottom: 4 }}>Tournament Bracket</h2>
-            <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: '1.5rem' }}>Simulated — your teams are highlighted in green.</p>
+            <p style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 8 }}>
+              {myPicks.length > 0 && <span>Your teams: <span style={{ color: 'var(--clay-light)', fontWeight: 600 }}>highlighted in orange</span></span>}
+            </p>
+            {/* My teams legend */}
+            {myPicks.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: '1rem' }}>
+                {myPicks.map(n => (
+                  <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(193,73,46,.15)', border: '1px solid rgba(193,73,46,.35)', borderRadius: 6, padding: '3px 8px', fontSize: 11, color: 'var(--clay-light)', fontWeight: 600 }}>
+                    <Flag team={n} size={10} />{n}
+                  </div>
+                ))}
+              </div>
+            )}
             {!bracket ? (
               <div className="empty"><p>Bracket generates once the draft is complete.</p></div>
             ) : (
@@ -1030,14 +1092,27 @@ export default function LeaguePage() {
                       <div className="b-matches">
                         {matches.map((m, i) => (
                           <div key={i} className="b-match">
-                            {[{ team: m.a, goals: m.ag }, { team: m.b, goals: m.bg }].map(({ team, goals }, ti) => (
-                              <div key={ti} className={`b-team ${m.w?.n === team?.n ? 'winner' : ''} ${myPicks.includes(team?.n) ? 'my-team' : ''}`}
-                                style={myPicks.includes(team?.n) ? { background: 'rgba(193,73,46,0.2)', borderLeft: '3px solid var(--clay)', paddingLeft: 5 } : {}}>
-                                <Flag team={team?.n} size={12} />
-                                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 4 }}>{team?.n}</span>
-                                <span className="b-score">{goals}</span>
-                              </div>
-                            ))}
+                            {[{ team: m.a, goals: m.ag }, { team: m.b, goals: m.bg }].map(({ team, goals }, ti) => {
+                              const isMine = myPicks.includes(team?.n)
+                              const isWinner = m.w?.n === team?.n
+                              return (
+                                <div key={ti}
+                                  className={`b-team ${isWinner ? 'winner' : ''} ${isMine ? 'my-team' : ''}`}
+                                  style={{
+                                    background: isMine ? 'rgba(193,73,46,0.18)' : undefined,
+                                    borderLeft: isMine ? '3px solid var(--clay)' : undefined,
+                                    paddingLeft: isMine ? 4 : undefined,
+                                  }}>
+                                  <Flag team={team?.n} size={12} />
+                                  <span style={{
+                                    flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 4,
+                                    color: isMine ? 'var(--clay-light)' : undefined,
+                                    fontWeight: isMine ? 700 : undefined,
+                                  }}>{team?.n}</span>
+                                  <span className="b-score">{goals}</span>
+                                </div>
+                              )
+                            })}
                           </div>
                         ))}
                       </div>
@@ -1049,7 +1124,7 @@ export default function LeaguePage() {
                       <div className="b-matches">
                         <div className="b-match">
                           <div className={`b-team winner ${myPicks.includes(bracket.champ.n) ? 'my-team' : ''}`}
-                            style={myPicks.includes(bracket.champ.n) ? { background: 'rgba(193,73,46,0.25)', borderLeft: '3px solid var(--clay)', paddingLeft: 5 } : {}}>
+                            style={myPicks.includes(bracket.champ.n) ? { background: 'rgba(193,73,46,0.3)', borderLeft: '3px solid var(--clay)', paddingLeft: 5, color: 'var(--clay-light)', fontWeight: 700 } : {}}>
                             <Flag team={bracket.champ.n} size={12} />
                             <span style={{ marginLeft: 4 }}>{bracket.champ.n}</span>
                           </div>
@@ -1155,15 +1230,7 @@ export default function LeaguePage() {
         )}
       </div>
       {/* Bottom Navigation */}
-      <div style={{
-        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 100,
-        background: 'rgba(14,24,16,0.97)',
-        borderTop: '1px solid var(--border)',
-        backdropFilter: 'blur(16px)',
-        display: 'flex',
-        height: 64,
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}>
+      <div className="bottom-nav">
         {[
           { id: 'league', label: 'Home', icon: (active) => (
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--clay)' : 'var(--text3)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
