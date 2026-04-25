@@ -46,9 +46,12 @@ export default function ProfilePage() {
     setUploading(true)
     const ext = file.name.split('.').pop()
     const path = `avatars/${user.id}.${ext}`
+    // Try to create bucket if it doesn't exist
+    await supabase.storage.createBucket('avatars', { public: true }).catch(() => {})
     const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
     if (uploadError) {
-      setMessage({ type: 'error', text: 'Photo upload failed — make sure the avatars storage bucket exists in Supabase.' })
+      console.error('Upload error:', uploadError)
+      setMessage({ type: 'error', text: `Upload failed: ${uploadError.message}` })
       setUploading(false)
       return
     }

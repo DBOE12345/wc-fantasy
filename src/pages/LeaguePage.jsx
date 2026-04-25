@@ -190,9 +190,12 @@ export default function LeaguePage() {
     setPicksOrdered(pickData || [])
 
     // Only treat draft as started if DB says so AND there are actual picks OR draft_pos > 0
-    // This prevents showing "draft in progress" on a fresh league
     const actuallyStarted = !!lg.draft_started && (lg.draft_pos > 0 || (pickData?.length || 0) > 0)
     setDraftStarted(actuallyStarted)
+    // If DB says started but no picks exist, clean up the stale state
+    if (!!lg.draft_started && !actuallyStarted) {
+      await supabase.from('leagues').update({ draft_started: false, draft_pos: 0 }).eq('id', lg.id)
+    }
 
     if (lg.bracket_data) setBracket(JSON.parse(lg.bracket_data))
     else if (Object.keys(pickMap).length >= 48) {
@@ -616,7 +619,7 @@ export default function LeaguePage() {
         </div>
       </div>
 
-      <div className="container page-wrap">
+      <div className="container page-wrap" style={{ paddingLeft: 'max(1rem, env(safe-area-inset-left))', paddingRight: 'max(1rem, env(safe-area-inset-right))' }}>
 
 
         {/* LEAGUE TAB */}
@@ -659,42 +662,6 @@ export default function LeaguePage() {
               <div style={{ background: 'rgba(200,169,106,.08)', border: '1px solid rgba(200,169,106,.25)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ fontSize: 14, color: 'var(--gold)', fontWeight: 600 }}>⏰ Draft starts in</div>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 20, fontWeight: 700, color: 'var(--gold)' }}>{countdown}</div>
-              </div>
-            )}
-
-            {/* Commissioner draft controls */}
-            {isCommissioner && draftStarted && !draftDone && (
-              <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem' }}>
-                <div className="card-title" style={{ marginBottom: 10 }}>Commissioner controls</div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ fontSize: 12, padding: '8px 14px' }}
-                    onClick={async () => {
-                      if (!window.confirm('Reverse the last pick? This cannot be undone.')) return
-                      const { data: lastPick } = await supabase
-                        .from('picks').select('id').eq('league_id', id)
-                        .order('picked_at', { ascending: false }).limit(1).single()
-                      if (lastPick) {
-                        await supabase.from('picks').delete().eq('id', lastPick.id)
-                        await supabase.from('leagues').update({ draft_pos: Math.max(0, (league?.draft_pos || 1) - 1) }).eq('id', id)
-                      }
-                    }}
-                  >
-                    ↩ Reverse last pick
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090', borderColor: 'rgba(255,75,75,.3)' }}
-                    onClick={async () => {
-                      if (!window.confirm('Restart the entire draft? All picks will be deleted.')) return
-                      await supabase.from('picks').delete().eq('league_id', id)
-                      await supabase.from('leagues').update({ draft_pos: 0, draft_started: false, bracket_data: null }).eq('id', id)
-                    }}
-                  >
-                    🔄 Restart draft
-                  </button>
-                </div>
               </div>
             )}
 
@@ -773,6 +740,48 @@ export default function LeaguePage() {
                   </div>
                 </div>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 700, color: timerColor }}>{timeLeft}s</div>
+              </div>
+            )}
+
+            {/* Commissioner controls - draft tab only */}
+            {isCommissioner && draftStarted && !draftDone && (
+              <div style={{ background: 'var(--bg3)', border: '1px solid var(--border-clay)', borderRadius: 10, padding: '12px 16px', marginBottom: 12 }}>
+                <div className="card-title" style={{ marginBottom: 8 }}>Commissioner controls</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 12, padding: '8px 14px' }}
+                    onClick={async () => {
+                      if (!window.confirm('Reverse the last pick? The player will get their turn back.')) return
+                      // Get the last pick with full details
+                      const { data: lastPick } = await supabase
+                        .from('picks').select('id, user_id, team_name')
+                        .eq('league_id', id)
+                        .order('picked_at', { ascending: false })
+                        .limit(1).single()
+                      if (!lastPick) { alert('No picks to reverse'); return }
+                      // Delete the pick
+                      await supabase.from('picks').delete().eq('id', lastPick.id)
+                      // Go back exactly 1 position so it's that player's turn again
+                      const newPos = Math.max(0, (league?.draft_pos || 1) - 1)
+                      await supabase.from('leagues').update({ draft_pos: newPos }).eq('id', id)
+                      alert(`Reversed: ${lastPick.team_name} removed. It's their turn again.`)
+                    }}
+                  >
+                    ↩ Reverse last pick
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090', borderColor: 'rgba(255,75,75,.3)' }}
+                    onClick={async () => {
+                      if (!window.confirm('Restart the entire draft? ALL picks will be deleted and everyone starts over.')) return
+                      await supabase.from('picks').delete().eq('league_id', id)
+                      await supabase.from('leagues').update({ draft_pos: 0, draft_started: false, bracket_data: null }).eq('id', id)
+                    }}
+                  >
+                    🔄 Restart draft
+                  </button>
+                </div>
               </div>
             )}
 

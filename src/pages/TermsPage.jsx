@@ -10,12 +10,12 @@ export default function TermsPage() {
         <div className="header-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className="btn btn-ghost" onClick={() => navigate(-1)} style={{ padding: '6px 8px', fontSize: 18 }}>←</button>
-            <DubUpLogoHorizontal height={44} />
+            <DubUpLogoHorizontal height={56} />
           </div>
         </div>
       </div>
 
-      <div className="container page-wrap">
+      <div className="container page-wrap" style={{ paddingLeft: 'max(1rem, env(safe-area-inset-left))', paddingRight: 'max(1rem, env(safe-area-inset-right))' }}>
         <h2 style={{ fontSize: 20, fontWeight: 900, fontFamily: 'var(--font-display)', textTransform: 'uppercase', letterSpacing: '.02em', marginBottom: 4 }}>Terms of Service</h2>
         <p style={{ fontSize: 13, color: 'var(--text3)', marginBottom: '1.5rem' }}>Last updated: April 2026</p>
 

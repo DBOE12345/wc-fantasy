@@ -109,7 +109,7 @@ export default function HomePage() {
         <div className="header-inner">
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             <button className="btn btn-ghost" onClick={() => navigate('/')} style={{padding:'6px 8px',fontSize:18}}>←</button>
-            <DubUpLogoHorizontal height={52} />
+            <DubUpLogoHorizontal height={56} />
           </div>
           <div style={{display:'flex',gap:8}}>
             <button className="btn btn-ghost" onClick={() => navigate('/how-to-play')} style={{padding:'6px 10px',fontSize:12,fontFamily:'var(--font-display)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text2)'}}>How to Play</button>
@@ -126,7 +126,7 @@ export default function HomePage() {
         </div>
       </div>
 
-      <div className="container page-wrap">
+      <div className="container page-wrap" style={{ paddingLeft: 'max(1rem, env(safe-area-inset-left))', paddingRight: 'max(1rem, env(safe-area-inset-right))' }}>
         <div style={{ marginBottom: '2rem' }}>
           <h1 style={{ fontSize: 26, fontWeight: 900, marginBottom: 6, fontFamily: 'var(--font-display)', textTransform: 'uppercase', letterSpacing: '.02em' }}>My Leagues</h1>
           <p style={{ color: 'var(--text2)', fontSize: 14 }}>Create a new league or join one with an invite code</p>

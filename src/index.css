@@ -37,6 +37,7 @@
 }
 
 body {
+  -webkit-tap-highlight-color: transparent;
   font-family: var(--font);
   background: var(--bg);
   color: var(--text);
@@ -48,8 +49,8 @@ body {
 }
 
 /* LAYOUT */
-.container { max-width: 720px; margin: 0 auto; padding: 0 1rem; }
-.page-wrap { padding: 1.5rem 0 5.5rem; }
+.container { max-width: 720px; margin: 0 auto; padding: 0 1.1rem; }
+.page-wrap { padding: 1.5rem 1rem calc(5.5rem + env(safe-area-inset-bottom, 0px)); }
 
 /* HEADER */
 .app-header {
@@ -319,8 +320,8 @@ body {
 
 /* MOBILE */
 @media (max-width: 480px) {
-  .container { padding: 0 0.75rem; }
-  .page-wrap { padding: 1rem 0 5rem; }
+  .container { padding: 0 0.9rem; }
+  .page-wrap { padding: 1rem 0.9rem calc(5rem + env(safe-area-inset-bottom, 0px)); }
   .team-grid { grid-template-columns: repeat(4, 1fr); gap: 5px; }
   .team-card { padding: 7px 4px; }
   .team-card .tname { font-size: 9px; }
@@ -328,7 +329,7 @@ body {
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .tab { padding: 10px 10px; font-size: 11px; }
   .card { padding: 0.875rem 1rem; }
-  .bracket-scroll { margin: 0 -0.75rem; padding: 0 0.75rem 1rem; }
+  .bracket-scroll { margin: 0 -0.9rem; padding: 0 0.9rem 1rem; }
   .b-round { min-width: 95px; }
   .b-team { font-size: 10px; padding: 4px 6px; }
   .code-text { font-size: 18px; }

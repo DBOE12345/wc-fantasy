@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import DubUpLogo, { DubUpLogoLarge } from '../components/DubUpLogo'
+import stackedImg from '../assets/dubup-logo-stacked.png'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
@@ -46,7 +47,7 @@ export default function WelcomePage() {
 
         {/* Big DU logo */}
         <div style={{ marginBottom: 8 }}>
-          <DubUpLogoLarge size={320} />
+          <img src={stackedImg} alt="DubUp Fantasy" style={{ width: "min(380px, calc(100vw - 40px))", height: "auto", objectFit: "contain" }} />
         </div>
 
         {/* Tagline */}
@@ -143,7 +144,7 @@ export default function WelcomePage() {
           >
             {/* Menu header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
-              <DubUpLogoLarge size={320} />
+              <img src={stackedImg} alt="DubUp Fantasy" style={{ width: "min(380px, calc(100vw - 40px))", height: "auto", objectFit: "contain" }} />
               <div>
                 <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 18, textTransform: 'uppercase', letterSpacing: '.04em' }}>
                   <span style={{ color: 'var(--clay)' }}>DUB</span>UP
