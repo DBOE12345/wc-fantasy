@@ -46,7 +46,7 @@ export default function WelcomePage() {
 
         {/* Big DU logo */}
         <div style={{ marginBottom: 8 }}>
-          <DubUpLogoLarge size={280} />
+          <DubUpLogoLarge size={320} />
         </div>
 
         {/* Tagline */}
@@ -143,7 +143,7 @@ export default function WelcomePage() {
           >
             {/* Menu header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
-              <DubUpLogoLarge size={44} />
+              <DubUpLogoLarge size={320} />
               <div>
                 <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 18, textTransform: 'uppercase', letterSpacing: '.04em' }}>
                   <span style={{ color: 'var(--clay)' }}>DUB</span>UP

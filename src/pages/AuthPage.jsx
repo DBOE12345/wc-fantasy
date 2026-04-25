@@ -6,12 +6,24 @@ export default function AuthPage() {
   const { signIn, signUp } = useAuth()
   const [mode, setMode] = useState('login')
   const [agreedToTerms, setAgreedToTerms] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+
+  async function handleReset() {
+    if (!email) { setError('Enter your email address first'); return }
+    setLoading(true)
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + '/auth'
+    })
+    setLoading(false)
+    if (error) setError(error.message)
+    else { setResetSent(true); setError('') }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -81,6 +93,20 @@ export default function AuthPage() {
             <label htmlFor="terms" style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5, cursor: 'pointer' }}>
               I agree to the <a href="/terms" target="_blank" style={{ color: 'var(--clay)' }}>Terms of Service</a>. DubUp Fantasy is not affiliated with FIFA or any official football organization.
             </label>
+          </div>
+        )}
+
+        {mode === 'login' && (
+          <div style={{ textAlign: 'right', marginTop: -8, marginBottom: 12 }}>
+            <a onClick={handleReset} style={{ fontSize: 12, color: 'var(--text2)', cursor: 'pointer' }}>
+              Forgot password?
+            </a>
+          </div>
+        )}
+
+        {resetSent && (
+          <div className="success-msg" style={{ marginBottom: 12 }}>
+            Password reset email sent! Check your inbox.
           </div>
         )}
 

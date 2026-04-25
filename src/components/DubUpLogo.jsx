@@ -25,12 +25,12 @@ export function DubUpLogoLarge({ size = 220 }) {
 }
 
 // Horizontal - nav headers
-export function DubUpLogoHorizontal({ height = 52 }) {
+export function DubUpLogoHorizontal({ height = 56 }) {
   return (
     <img
       src={horizontalImg}
       alt="DubUp Fantasy"
-      style={{ height: height, width: 'auto', objectFit: 'contain', flexShrink: 0, maxWidth: 220 }}
+      style={{ height: height, width: 'auto', objectFit: 'contain', flexShrink: 0, maxWidth: 240 }}
     />
   )
 }

@@ -157,8 +157,8 @@ export default function LeaguePage() {
     const { data: lg } = await supabase.from('leagues').select('*').eq('id', id).single()
     if (!lg) { navigate('/'); return }
     setLeague(lg)
-    setDraftStarted(!!lg.draft_started)
     if (lg.scheduled_at) setScheduledTime(lg.scheduled_at.slice(0, 16))
+    // draft_started will be set after we load picks below
 
     // Fetch members without profiles join first (more reliable)
     const { data: mems, error: memsError } = await supabase
@@ -188,6 +188,11 @@ export default function LeaguePage() {
     pickData?.forEach(p => { pickMap[p.team_name] = p.user_id })
     setPicks(pickMap)
     setPicksOrdered(pickData || [])
+
+    // Only treat draft as started if DB says so AND there are actual picks OR draft_pos > 0
+    // This prevents showing "draft in progress" on a fresh league
+    const actuallyStarted = !!lg.draft_started && (lg.draft_pos > 0 || (pickData?.length || 0) > 0)
+    setDraftStarted(actuallyStarted)
 
     if (lg.bracket_data) setBracket(JSON.parse(lg.bracket_data))
     else if (Object.keys(pickMap).length >= 48) {
@@ -595,7 +600,7 @@ export default function LeaguePage() {
         <div className="header-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className="btn btn-ghost" onClick={() => navigate('/')} style={{ padding: '6px 8px', fontSize: 18 }}>←</button>
-            <DubUpLogoHorizontal height={52} />
+            <DubUpLogoHorizontal height={56} />
             <span style={{ color: 'var(--text3)', fontSize: 13 }}>·</span>
             <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '.04em', fontFamily: 'var(--font-display)' }}>{league?.name}</span>
           </div>

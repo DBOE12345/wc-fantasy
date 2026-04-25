@@ -30,8 +30,9 @@ export default function ProfilePage() {
   async function saveProfile() {
     if (!username.trim()) { setMessage({ type: 'error', text: 'Username cannot be empty' }); return }
     setSaving(true)
-    const { error } = await supabase.from('profiles')
-      .upsert({ id: user.id, username: username.trim(), email: user.email, avatar_url: avatarUrl })
+    const updateData = { id: user.id, username: username.trim(), email: user.email }
+    if (avatarUrl) updateData.avatar_url = avatarUrl
+    const { error } = await supabase.from('profiles').upsert(updateData)
     setSaving(false)
     if (error) setMessage({ type: 'error', text: error.message })
     else setMessage({ type: 'success', text: 'Profile saved!' })
@@ -46,7 +47,11 @@ export default function ProfilePage() {
     const ext = file.name.split('.').pop()
     const path = `avatars/${user.id}.${ext}`
     const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
-    if (uploadError) { setMessage({ type: 'error', text: 'Upload failed' }); setUploading(false); return }
+    if (uploadError) {
+      setMessage({ type: 'error', text: 'Photo upload failed — make sure the avatars storage bucket exists in Supabase.' })
+      setUploading(false)
+      return
+    }
     const { data } = supabase.storage.from('avatars').getPublicUrl(path)
     setAvatarUrl(data.publicUrl)
     await supabase.from('profiles').upsert({ id: user.id, username, email: user.email, avatar_url: data.publicUrl })
@@ -63,7 +68,7 @@ export default function ProfilePage() {
         <div className="header-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className="btn btn-ghost" onClick={() => navigate(-1)} style={{ padding: '6px 8px', fontSize: 18 }}>←</button>
-            <DubUpLogoHorizontal height={44} />
+            <DubUpLogoHorizontal height={56} />
           </div>
         </div>
       </div>

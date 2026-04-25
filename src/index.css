@@ -67,7 +67,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 64px;
+  height: 70px;
 }
 .logo {
   font-family: var(--font-display);
