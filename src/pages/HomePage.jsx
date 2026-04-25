@@ -109,7 +109,15 @@ export default function HomePage() {
         <div className="header-inner">
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             <button className="btn btn-ghost" onClick={() => navigate('/')} style={{padding:'6px 8px',fontSize:18}}>←</button>
-            <DubUpLogoHorizontal height={44} />
+            <DubUpLogoHorizontal height={52} />
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-ghost" onClick={() => navigate('/how-to-play')} style={{padding:'6px 10px',fontSize:12,fontFamily:'var(--font-display)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text2)'}}>How to Play</button>
+            <button className="btn btn-ghost" onClick={() => navigate('/profile')} style={{padding:'6px 8px'}}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+              </svg>
+            </button>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 13, color: 'var(--text2)' }}>{user?.email}</span>

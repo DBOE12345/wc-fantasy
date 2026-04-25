@@ -45,8 +45,8 @@ export default function WelcomePage() {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 72px)', padding: '2rem', textAlign: 'center', position: 'relative', zIndex: 5 }}>
 
         {/* Big DU logo */}
-        <div style={{ marginBottom: 16 }}>
-          <DubUpLogoLarge size={220} />
+        <div style={{ marginBottom: 8 }}>
+          <DubUpLogoLarge size={280} />
         </div>
 
         {/* Tagline */}

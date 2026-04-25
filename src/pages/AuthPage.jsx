@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 export default function AuthPage() {
   const { signIn, signUp } = useAuth()
   const [mode, setMode] = useState('login')
+  const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
@@ -20,6 +21,7 @@ export default function AuthPage() {
         const { error } = await signIn(email, password)
         if (error) setError(error.message)
       } else {
+        if (!agreedToTerms) { setError('Please accept the Terms of Service to continue'); setLoading(false); return }
         const { error } = await signUp(email, password, { data: { username } })
         if (error) setError(error.message)
         else setSuccess('Account created! Check your email to confirm, then log in.')
@@ -66,6 +68,21 @@ export default function AuthPage() {
             {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
           </button>
         </form>
+
+        {mode === 'signup' && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: '1rem' }}>
+            <input
+              type="checkbox"
+              id="terms"
+              checked={agreedToTerms}
+              onChange={e => setAgreedToTerms(e.target.checked)}
+              style={{ marginTop: 3, accentColor: 'var(--clay)', width: 16, height: 16, flexShrink: 0 }}
+            />
+            <label htmlFor="terms" style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5, cursor: 'pointer' }}>
+              I agree to the <a href="/terms" target="_blank" style={{ color: 'var(--clay)' }}>Terms of Service</a>. DubUp Fantasy is not affiliated with FIFA or any official football organization.
+            </label>
+          </div>
+        )}
 
         <div className="auth-switch">
           {mode === 'login' ? (

@@ -4,6 +4,9 @@ import AuthPage from './pages/AuthPage'
 import WelcomePage from './pages/WelcomePage'
 import HomePage from './pages/HomePage'
 import LeaguePage from './pages/LeaguePage'
+import ProfilePage from './pages/ProfilePage'
+import HowToPlayPage from './pages/HowToPlayPage'
+import TermsPage from './pages/TermsPage'
 import './index.css'
 
 function ProtectedRoute({ children }) {
@@ -21,6 +24,9 @@ function AppRoutes() {
       <Route path="/" element={<ProtectedRoute><WelcomePage /></ProtectedRoute>} />
       <Route path="/home" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
       <Route path="/league/:id" element={<ProtectedRoute><LeaguePage /></ProtectedRoute>} />
+      <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+      <Route path="/how-to-play" element={<ProtectedRoute><HowToPlayPage /></ProtectedRoute>} />
+      <Route path="/terms" element={<TermsPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

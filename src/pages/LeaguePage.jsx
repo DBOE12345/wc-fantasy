@@ -223,13 +223,14 @@ export default function LeaguePage() {
         const updated = payload.new
         if (updated) {
           setLeague(updated)
-          const wasStarted = draftStarted
           const nowStarted = !!updated.draft_started
-          setDraftStarted(nowStarted)
-          // Only play whistle if draft JUST started via real-time (another user started it)
-          if (!wasStarted && nowStarted && !didStartRef.current) {
-            try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 100) } catch(e) {}
-          }
+          setDraftStarted(prev => {
+            // Only play sound if transitioning false -> true
+            if (!prev && nowStarted && !didStartRef.current) {
+              try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
+            }
+            return nowStarted
+          })
           if (updated.bracket_data) {
             try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
           }
@@ -360,49 +361,50 @@ export default function LeaguePage() {
 
   async function makePick(teamName, isAuto = false) {
     if (!draftStarted) return
-    if (pickingRef.current) return // already picking, prevent double pick
+    if (pickingRef.current) return
     pickingRef.current = true
 
-    // Always fetch fresh state from DB before making a pick
-    const { data: freshLeague } = await supabase
-      .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
-    if (!freshLeague || !freshLeague.draft_started) return
-
-    const tpp = 48 / freshLeague.size
-    const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
-
-    // Only allow picking if it's this player's turn
-    if (whoseTurn !== mySlot) return
-
-    // Check team not already picked (use count, not single() which throws 406 on no rows)
-    const { count: existingCount } = await supabase
-      .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('team_name', teamName)
-    if (existingCount && existingCount > 0) return
-
-    // Check player hasn't exceeded their allotment
-    const { count: myCount } = await supabase
-      .from('picks').select('id', { count: 'exact' }).eq('league_id', id).eq('user_id', user.id)
-    if ((myCount || 0) >= tpp) return
-
     try {
+      // Always fetch fresh state from DB
+      const { data: freshLeague } = await supabase
+        .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
+      if (!freshLeague || !freshLeague.draft_started) return
+
+      const tpp = 48 / freshLeague.size
+      const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
+
+      // Only allow picking if it's this player's turn
+      if (whoseTurn !== mySlot) return
+
+      // Check team not already picked
+      const { count: existingCount } = await supabase
+        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('team_name', teamName)
+      if (existingCount && existingCount > 0) return
+
+      // Check player hasn't exceeded their allotment
+      const { count: myCount } = await supabase
+        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('user_id', user.id)
+      if ((myCount || 0) >= tpp) return
+
       // Insert pick
       const { error } = await supabase.from('picks').insert({
         league_id: id, user_id: user.id, team_name: teamName
       })
       if (error) return
 
-      // Update local ordered picks immediately
       setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
       playSound('pick')
 
-      // Advance draft position by exactly 1
-      const newPos = freshLeague.draft_pos + 1
-      await supabase.from('leagues').update({ draft_pos: newPos }).eq('id', id)
+      // Advance draft by exactly 1
+      await supabase.from('leagues').update({ draft_pos: freshLeague.draft_pos + 1 }).eq('id', id)
 
-      // Check if draft is now complete
-      const totalPicks = Object.keys(picks).length + 1
-      if (totalPicks >= 48) { setDraftComplete(true); playSound('complete') }
+      // Check if complete
+      const { count: totalCount } = await supabase
+        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id)
+      if ((totalCount || 0) >= 48) { setDraftComplete(true); playSound('complete') }
+
     } finally {
+      // ALWAYS release the lock no matter what
       pickingRef.current = false
     }
   }
@@ -593,11 +595,16 @@ export default function LeaguePage() {
         <div className="header-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className="btn btn-ghost" onClick={() => navigate('/')} style={{ padding: '6px 8px', fontSize: 18 }}>←</button>
-            <DubUpLogoHorizontal height={44} />
+            <DubUpLogoHorizontal height={52} />
             <span style={{ color: 'var(--text3)', fontSize: 13 }}>·</span>
             <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '.04em', fontFamily: 'var(--font-display)' }}>{league?.name}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={() => navigate('/profile')} style={{ padding: '6px 8px' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+              </svg>
+            </button>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text3)', letterSpacing: '.1em' }}>{league?.code}</span>
             <button className="btn btn-ghost" onClick={copyCode}>{copied ? '✓' : 'Copy'}</button>
           </div>
@@ -647,6 +654,42 @@ export default function LeaguePage() {
               <div style={{ background: 'rgba(200,169,106,.08)', border: '1px solid rgba(200,169,106,.25)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ fontSize: 14, color: 'var(--gold)', fontWeight: 600 }}>⏰ Draft starts in</div>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 20, fontWeight: 700, color: 'var(--gold)' }}>{countdown}</div>
+              </div>
+            )}
+
+            {/* Commissioner draft controls */}
+            {isCommissioner && draftStarted && !draftDone && (
+              <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem' }}>
+                <div className="card-title" style={{ marginBottom: 10 }}>Commissioner controls</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 12, padding: '8px 14px' }}
+                    onClick={async () => {
+                      if (!window.confirm('Reverse the last pick? This cannot be undone.')) return
+                      const { data: lastPick } = await supabase
+                        .from('picks').select('id').eq('league_id', id)
+                        .order('picked_at', { ascending: false }).limit(1).single()
+                      if (lastPick) {
+                        await supabase.from('picks').delete().eq('id', lastPick.id)
+                        await supabase.from('leagues').update({ draft_pos: Math.max(0, (league?.draft_pos || 1) - 1) }).eq('id', id)
+                      }
+                    }}
+                  >
+                    ↩ Reverse last pick
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090', borderColor: 'rgba(255,75,75,.3)' }}
+                    onClick={async () => {
+                      if (!window.confirm('Restart the entire draft? All picks will be deleted.')) return
+                      await supabase.from('picks').delete().eq('league_id', id)
+                      await supabase.from('leagues').update({ draft_pos: 0, draft_started: false, bracket_data: null }).eq('id', id)
+                    }}
+                  >
+                    🔄 Restart draft
+                  </button>
+                </div>
               </div>
             )}
 
