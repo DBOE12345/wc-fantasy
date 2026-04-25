@@ -219,12 +219,23 @@ export default function LeaguePage() {
     load()
     const channel = supabase.channel(`league_${id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, (payload) => {
-        // Just update picks locally instead of full reload
         const newPick = payload.new
         if (newPick) {
           setPicks(prev => ({ ...prev, [newPick.team_name]: newPick.user_id }))
           setPicksOrdered(prev => [...prev, newPick])
           setTimeLeft(PICK_TIMER)
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, (payload) => {
+        // Pick was reversed — remove it from local state
+        const deleted = payload.old
+        if (deleted?.team_name) {
+          setPicks(prev => {
+            const next = { ...prev }
+            delete next[deleted.team_name]
+            return next
+          })
+          setPicksOrdered(prev => prev.filter(p => p.team_name !== deleted.team_name))
         }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}` }, (payload) => {
@@ -233,14 +244,23 @@ export default function LeaguePage() {
           setLeague(updated)
           const nowStarted = !!updated.draft_started
           setDraftStarted(prev => {
-            // Only play sound if transitioning false -> true
             if (!prev && nowStarted && !didStartRef.current) {
               try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
+            }
+            // Draft was restarted — clear all local state
+            if (prev && !nowStarted && updated.draft_pos === 0) {
+              setPicks({})
+              setPicksOrdered([])
+              setBracket(null)
+              setTimeLeft(PICK_TIMER)
             }
             return nowStarted
           })
           if (updated.bracket_data) {
             try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+          } else if (!updated.draft_started && updated.draft_pos === 0) {
+            // Draft was reset
+            setBracket(null)
           }
         }
       })
@@ -752,20 +772,21 @@ export default function LeaguePage() {
                     className="btn btn-secondary"
                     style={{ fontSize: 12, padding: '8px 14px' }}
                     onClick={async () => {
-                      if (!window.confirm('Reverse the last pick? The player will get their turn back.')) return
-                      // Get the last pick with full details
+                      if (!window.confirm('Reverse the last pick? That team will return to the pool and it will be their turn again.')) return
+                      // Get the very last pick
                       const { data: lastPick } = await supabase
                         .from('picks').select('id, user_id, team_name')
                         .eq('league_id', id)
                         .order('picked_at', { ascending: false })
                         .limit(1).single()
                       if (!lastPick) { alert('No picks to reverse'); return }
-                      // Delete the pick
-                      await supabase.from('picks').delete().eq('id', lastPick.id)
-                      // Go back exactly 1 position so it's that player's turn again
+                      // Delete the pick — team returns to pool
+                      const { error } = await supabase.from('picks').delete().eq('id', lastPick.id)
+                      if (error) { alert('Error reversing pick'); return }
+                      // Step back draft_pos by 1 so it's that player's turn again
                       const newPos = Math.max(0, (league?.draft_pos || 1) - 1)
                       await supabase.from('leagues').update({ draft_pos: newPos }).eq('id', id)
-                      alert(`Reversed: ${lastPick.team_name} removed. It's their turn again.`)
+                      // Real-time will sync all clients automatically via subscription
                     }}
                   >
                     ↩ Reverse last pick
@@ -774,9 +795,13 @@ export default function LeaguePage() {
                     className="btn btn-secondary"
                     style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090', borderColor: 'rgba(255,75,75,.3)' }}
                     onClick={async () => {
-                      if (!window.confirm('Restart the entire draft? ALL picks will be deleted and everyone starts over.')) return
+                      if (!window.confirm('Restart the entire draft? ALL picks deleted, everyone starts over.')) return
+                      // Delete all picks first
                       await supabase.from('picks').delete().eq('league_id', id)
-                      await supabase.from('leagues').update({ draft_pos: 0, draft_started: false, bracket_data: null }).eq('id', id)
+                      // Reset league state — real-time subscription will sync all clients
+                      await supabase.from('leagues')
+                        .update({ draft_pos: 0, draft_started: false, bracket_data: null })
+                        .eq('id', id)
                     }}
                   >
                     🔄 Restart draft

@@ -39,28 +39,28 @@ export default function ProfilePage() {
     setTimeout(() => setMessage(null), 3000)
   }
 
-  async function uploadAvatar(e) {
+  async function handleAvatarChange(e) {
     const file = e.target.files?.[0]
     if (!file) return
-    if (file.size > 2 * 1024 * 1024) { setMessage({ type: 'error', text: 'Image must be under 2MB' }); return }
+    if (file.size > 1 * 1024 * 1024) { setMessage({ type: 'error', text: 'Image must be under 1MB' }); return }
     setUploading(true)
-    const ext = file.name.split('.').pop()
-    const path = `avatars/${user.id}.${ext}`
-    // Try to create bucket if it doesn't exist
-    await supabase.storage.createBucket('avatars', { public: true }).catch(() => {})
-    const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
-    if (uploadError) {
-      console.error('Upload error:', uploadError)
-      setMessage({ type: 'error', text: `Upload failed: ${uploadError.message}` })
+    
+    // Convert to base64 and store directly in profiles table
+    // This avoids all storage bucket / RLS issues
+    const reader = new FileReader()
+    reader.onload = async (ev) => {
+      const base64 = ev.target.result
+      setAvatarUrl(base64)
+      const { error } = await supabase.from('profiles').upsert({
+        id: user.id, username: username.trim() || '', email: user.email, avatar_url: base64
+      })
       setUploading(false)
-      return
+      if (error) setMessage({ type: 'error', text: error.message })
+      else setMessage({ type: 'success', text: 'Photo updated!' })
+      setTimeout(() => setMessage(null), 3000)
     }
-    const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-    setAvatarUrl(data.publicUrl)
-    await supabase.from('profiles').upsert({ id: user.id, username, email: user.email, avatar_url: data.publicUrl })
-    setUploading(false)
-    setMessage({ type: 'success', text: 'Avatar updated!' })
-    setTimeout(() => setMessage(null), 3000)
+    reader.onerror = () => { setUploading(false); setMessage({ type: 'error', text: 'Failed to read image' }) }
+    reader.readAsDataURL(file)
   }
 
   if (loading) return <div className="container page-wrap"><div className="empty">Loading...</div></div>
@@ -76,7 +76,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div className="container page-wrap">
+      <div className="container page-wrap" style={{ paddingLeft: 'max(1rem, env(safe-area-inset-left))', paddingRight: 'max(1rem, env(safe-area-inset-right))' }}>
         <h2 style={{ fontSize: 20, fontWeight: 900, fontFamily: 'var(--font-display)', textTransform: 'uppercase', letterSpacing: '.02em', marginBottom: 4 }}>My Profile</h2>
         <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: '1.5rem' }}>Update your name and photo</p>
 
@@ -86,7 +86,6 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Avatar */}
         <div className="card" style={{ marginBottom: '1rem' }}>
           <div className="card-title">Profile photo</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -111,29 +110,25 @@ export default function ProfilePage() {
               <button className="btn btn-secondary" onClick={() => fileRef.current?.click()} disabled={uploading} style={{ fontSize: 13, padding: '8px 16px' }}>
                 {uploading ? 'Uploading...' : 'Change photo'}
               </button>
-              <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>JPG or PNG, max 2MB</div>
+              <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>JPG or PNG, max 1MB</div>
             </div>
           </div>
-          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={uploadAvatar} />
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarChange} />
         </div>
 
-        {/* Username */}
         <div className="card" style={{ marginBottom: '1rem' }}>
           <div className="card-title">Display name</div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <input
-              className="input"
-              type="text"
-              placeholder="Your name"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              maxLength={24}
-            />
-            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>This is how you appear in leagues</div>
-          </div>
+          <input
+            className="input"
+            type="text"
+            placeholder="Your name"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            maxLength={24}
+          />
+          <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>This is how you appear in leagues</div>
         </div>
 
-        {/* Email (read only) */}
         <div className="card" style={{ marginBottom: '1.5rem' }}>
           <div className="card-title">Email</div>
           <div style={{ fontSize: 14, color: 'var(--text2)' }}>{user?.email}</div>
