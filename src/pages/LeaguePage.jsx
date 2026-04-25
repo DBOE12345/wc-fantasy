@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { TEAMS, TEAM_MAP, SCORING, STAGE_LABELS } from '../lib/teams'
+import { fetchLiveFixtures } from '../lib/api'
 import { snakeOrder } from '../lib/draft'
 import { simulateBracket } from '../lib/bracket'
 import { fetchFixtures, calcTotalPoints } from '../lib/api'
@@ -144,6 +145,10 @@ export default function LeaguePage() {
   const [selectedPlayer, setSelectedPlayer] = useState(null)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [myProfile, setMyProfile] = useState(null)
+  const [draftSettingsOpen, setDraftSettingsOpen] = useState(false)
+  const [liveScores, setLiveScores] = useState([])
+  const [liveScoresLoading, setLiveScoresLoading] = useState(false)
+  const [manualOrder, setManualOrder] = useState([])
   const [viewingPlayer, setViewingPlayer] = useState(null) // for My Teams dropdown
   const [chatMessages, setChatMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
@@ -233,7 +238,7 @@ export default function LeaguePage() {
         }
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, (payload) => {
-        // Pick was reversed — remove it from local state
+        // Pick was reversed — remove from local state AND reload to ensure full sync on all devices
         const deleted = payload.old
         if (deleted?.team_name) {
           setPicks(prev => {
@@ -243,6 +248,8 @@ export default function LeaguePage() {
           })
           setPicksOrdered(prev => prev.filter(p => p.team_name !== deleted.team_name))
         }
+        // Full reload ensures phone and all other clients are in sync
+        load()
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}` }, (payload) => {
         const updated = payload.new
@@ -443,7 +450,75 @@ export default function LeaguePage() {
     }
   }
 
+  // Push notification registration
+  async function registerPushNotifications() {
+    if (!('Notification' in window)) return false
+    const permission = await Notification.requestPermission()
+    return permission === 'granted'
+  }
+
+  function sendDraftTurnNotification(playerName) {
+    if (Notification.permission !== 'granted') return
+    const n = new Notification('Your pick is up! ⚽', {
+      body: `It's your turn to pick in ${league?.name}. You have 60 seconds!`,
+      icon: '/dubup-icon.png',
+      badge: '/dubup-icon.png',
+      tag: 'draft-turn',
+      requireInteraction: true,
+    })
+    n.onclick = () => { window.focus(); n.close() }
+  }
+
+  function sendDraftStartNotification() {
+    if (Notification.permission !== 'granted') return
+    const n = new Notification('Draft starting! 🏆', {
+      body: `The draft for ${league?.name} has begun!`,
+      icon: '/dubup-icon.png',
+      tag: 'draft-start',
+    })
+    n.onclick = () => { window.focus(); n.close() }
+  }
+
+  // Live scores fetcher
+  async function fetchLiveScores() {
+    setLiveScoresLoading(true)
+    try {
+      const fixtures = await fetchLiveFixtures()
+      setLiveScores(fixtures)
+    } catch(e) {
+      console.error('Live scores error:', e)
+    }
+    setLiveScoresLoading(false)
+  }
+
+  // Generate random draft order
+  async function randomizeDraftOrder() {
+    if (!window.confirm('Randomize the draft order for all players?')) return
+    const shuffled = [...members].sort(() => Math.random() - 0.5)
+    const updates = shuffled.map((m, i) =>
+      supabase.from('league_members').update({ draft_slot: i }).eq('id', m.id)
+    )
+    await Promise.all(updates)
+    // Reload to reflect new order
+    await load()
+    setDraftSettingsOpen(false)
+    alert('Draft order randomized!')
+  }
+
+  // Save manual draft order
+  async function saveManualOrder(newOrder) {
+    const updates = newOrder.map((memberId, i) => {
+      const member = members.find(m => m.user_id === memberId)
+      return member ? supabase.from('league_members').update({ draft_slot: i }).eq('id', member.id) : Promise.resolve()
+    })
+    await Promise.all(updates)
+    await load()
+    setDraftSettingsOpen(false)
+  }
+
   async function startDraft() {
+    // Request notification permission before starting
+    await registerPushNotifications()
     getAudioCtx()
     if ('Notification' in window && Notification.permission === 'default') {
       await Notification.requestPermission()
@@ -456,14 +531,16 @@ export default function LeaguePage() {
   // Track whether WE triggered the draft start (vs loading into an already-started draft)
   const didStartRef = useRef(false)
 
-  function sendPickNotification(playerName) {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('⚽ Your turn to pick!', {
-        body: `It's your pick in ${league?.name}. You have 60 seconds!`,
-        icon: '/favicon.ico',
-        tag: 'draft-pick'
-      })
-    }
+  function sendPickNotification() {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return
+    const n = new Notification('⚽ Your turn to pick!', {
+      body: `It's your pick in ${league?.name || 'your league'}. You have 60 seconds!`,
+      icon: '/dubup-icon.png',
+      badge: '/dubup-icon.png',
+      tag: 'draft-pick',
+      requireInteraction: true,
+    })
+    n.onclick = () => { window.focus(); n.close() }
   }
 
   async function saveSchedule() {
@@ -670,6 +747,7 @@ export default function LeaguePage() {
             </div>
             {/* Menu items */}
             {[
+              { label: 'Refer Friends', icon: '🌍', action: () => { navigate('/referral'); setProfileMenuOpen(false) } },
               { label: 'Edit Profile', icon: '👤', action: () => { navigate('/profile'); setProfileMenuOpen(false) } },
               { label: 'How to Play', icon: '📖', action: () => { navigate('/how-to-play'); setProfileMenuOpen(false) } },
               { label: 'Sign Out', icon: '🚪', action: () => { signOut(); setProfileMenuOpen(false) }, danger: true },
@@ -774,6 +852,57 @@ export default function LeaguePage() {
                 </div>
               ))}
             </div>
+
+            {/* Live Scores Widget — shows after WC starts June 11 2026 */}
+            {draftDone && (() => {
+              const wcStartDate = new Date('2026-06-11T00:00:00Z')
+              const isLive = new Date() >= wcStartDate
+              return (
+                <div style={{ marginTop: '1.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                    <div className="card-title" style={{ marginBottom: 0 }}>⚽ Live Scores</div>
+                    {isLive && (
+                      <button className="btn btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={fetchLiveScores} disabled={liveScoresLoading}>
+                        {liveScoresLoading ? '...' : 'Refresh'}
+                      </button>
+                    )}
+                  </div>
+                  {!isLive ? (
+                    <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.5rem', textAlign: 'center' }}>
+                      <div style={{ fontSize: 24, marginBottom: 8 }}>📅</div>
+                      <div style={{ fontSize: 14, color: 'var(--text2)', fontWeight: 600 }}>World Cup starts June 11, 2026</div>
+                      <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>Live scores and real-time points will appear here</div>
+                    </div>
+                  ) : liveScores.length === 0 ? (
+                    <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.5rem', textAlign: 'center' }}>
+                      <div style={{ fontSize: 14, color: 'var(--text2)' }}>No live matches right now</div>
+                      <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>Tap Refresh to check for updates</div>
+                    </div>
+                  ) : liveScores.map((fix, fi) => {
+                    const home = fix.teams?.home?.name
+                    const away = fix.teams?.away?.name
+                    const homeGoals = fix.goals?.home ?? '?'
+                    const awayGoals = fix.goals?.away ?? '?'
+                    const status = fix.fixture?.status?.elapsed
+                    const myTeamsInMatch = myPicks.filter(t => t === home || t === away)
+                    return (
+                      <div key={fi} style={{ background: myTeamsInMatch.length ? 'rgba(193,73,46,.05)' : 'var(--bg2)', border: `1px solid ${myTeamsInMatch.length ? 'var(--border-clay)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ flex: 1, fontSize: 13, color: myPicks.includes(home) ? 'var(--clay-light)' : 'var(--text)', fontWeight: myPicks.includes(home) ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <Flag team={home} size={14} /> {home}
+                        </div>
+                        <div style={{ textAlign: 'center', minWidth: 60 }}>
+                          <div style={{ fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{homeGoals} - {awayGoals}</div>
+                          {status && <div style={{ fontSize: 10, color: '#5DCAA5', fontFamily: 'var(--font-display)', fontWeight: 700 }}>{status}'</div>}
+                        </div>
+                        <div style={{ flex: 1, fontSize: 13, color: myPicks.includes(away) ? 'var(--clay-light)' : 'var(--text)', fontWeight: myPicks.includes(away) ? 700 : 500, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {away} <Flag team={away} size={14} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
           </>
         )}
 
@@ -782,12 +911,80 @@ export default function LeaguePage() {
           try { return (
           <>
             {!draftStarted ? (
-              <div style={{ background: 'rgba(255,255,255,.05)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: '1.25rem', textAlign: 'center' }}>
-                <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: isCommissioner ? 12 : 0 }}>
-                  {league?.scheduled_at ? `Draft starts ${new Date(league.scheduled_at).toLocaleString()}` : 'Waiting for commissioner to start the draft'}
-                </p>
-                {isCommissioner && <button className="btn btn-primary" onClick={startDraft}>🚀 Start draft now</button>}
-              </div>
+              <>
+                <div style={{ background: 'rgba(255,255,255,.05)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: '1.25rem', textAlign: 'center' }}>
+                  <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: isCommissioner ? 12 : 0 }}>
+                    {league?.scheduled_at ? `Draft starts ${new Date(league.scheduled_at).toLocaleString()}` : 'Waiting for commissioner to start the draft'}
+                  </p>
+                  {isCommissioner && <button className="btn btn-primary" onClick={startDraft}>🚀 Start draft now</button>}
+                </div>
+
+                {/* Draft Order Card */}
+                <div className="card" style={{ marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                    <div className="card-title" style={{ marginBottom: 0 }}>Draft Order</div>
+                    {isCommissioner && (
+                      <button onClick={() => setDraftSettingsOpen(v => !v)} style={{ background: 'none', border: '1px solid var(--border2)', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 13, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                        ⚙️ <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em' }}>Settings</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Settings panel */}
+                  {draftSettingsOpen && isCommissioner && (
+                    <div style={{ background: 'var(--bg3)', border: '1px solid var(--border-clay)', borderRadius: 10, padding: '12px', marginBottom: '1rem' }}>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10, lineHeight: 1.5 }}>
+                        Set the draft pick order. The snake draft reverses each round automatically.
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '8px 14px' }} onClick={randomizeDraftOrder}>
+                          🎲 Randomize order
+                        </button>
+                      </div>
+                      {/* Manual order - drag by tapping up/down */}
+                      <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8, fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>Manual order</div>
+                      {(() => {
+                        const ordered = [...members].sort((a, b) => (a.draft_slot ?? 0) - (b.draft_slot ?? 0))
+                        return ordered.map((m, i) => (
+                          <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: i < ordered.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                            <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--clay-light)', width: 20 }}>#{i + 1}</span>
+                            <div className="avatar" style={{ width: 28, height: 28, fontSize: 11, background: AV_BG[i % 8], color: AV_FG[i % 8] }}>{getDisplayName(m).slice(0,2).toUpperCase()}</div>
+                            <span style={{ flex: 1, fontSize: 13, color: 'var(--text)' }}>{getDisplayName(m)}</span>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              {i > 0 && (
+                                <button onClick={async () => {
+                                  const newOrder = [...ordered]
+                                  ;[newOrder[i-1], newOrder[i]] = [newOrder[i], newOrder[i-1]]
+                                  await saveManualOrder(newOrder.map(x => x.user_id))
+                                }} style={{ background: 'var(--bg4)', border: '1px solid var(--border)', borderRadius: 5, padding: '3px 8px', cursor: 'pointer', color: 'var(--text2)', fontSize: 12 }}>↑</button>
+                              )}
+                              {i < ordered.length - 1 && (
+                                <button onClick={async () => {
+                                  const newOrder = [...ordered]
+                                  ;[newOrder[i], newOrder[i+1]] = [newOrder[i+1], newOrder[i]]
+                                  await saveManualOrder(newOrder.map(x => x.user_id))
+                                }} style={{ background: 'var(--bg4)', border: '1px solid var(--border)', borderRadius: 5, padding: '3px 8px', cursor: 'pointer', color: 'var(--text2)', fontSize: 12 }}>↓</button>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Current order display for everyone */}
+                  {[...members].sort((a, b) => (a.draft_slot ?? 0) - (b.draft_slot ?? 0)).map((m, i) => (
+                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < members.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--clay-light)', width: 22 }}>#{i + 1}</span>
+                      <div className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: AV_BG[i % 8], color: AV_FG[i % 8] }}>{getDisplayName(m).slice(0,2).toUpperCase()}</div>
+                      <span style={{ flex: 1, fontSize: 13, color: m.user_id === user.id ? 'var(--clay-light)' : 'var(--text)', fontWeight: m.user_id === user.id ? 700 : 400 }}>
+                        {getDisplayName(m)} {m.user_id === user.id && '(you)'}
+                      </span>
+                      {m.user_id === user.id && <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>Pick {i + 1}</span>}
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : draftDone ? (
               <div style={{ background: 'rgba(29,158,117,.1)', border: '1px solid rgba(29,158,117,.3)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', fontSize: 14, color: '#5DCAA5', fontWeight: 500 }}>
                 ✅ Draft complete — all teams assigned!
@@ -1213,6 +1410,8 @@ export default function LeaguePage() {
                 <tr><td>Each goal scored</td><td style={{ fontWeight: 600, fontFamily: 'var(--mono)' }}>+1 pt</td></tr>
                 <tr><td>4+ goals in a match</td><td style={{ fontWeight: 600, fontFamily: 'var(--mono)' }}>+2 bonus</td></tr>
                 <tr><td>Clean sheet</td><td style={{ fontWeight: 600, fontFamily: 'var(--mono)' }}>+3 pts</td></tr>
+                <tr><td style={{ color: '#FF9090' }}>Own goal</td><td style={{ fontWeight: 600, fontFamily: 'var(--mono)', color: '#FF9090' }}>-1 pt</td></tr>
+                <tr><td style={{ color: '#FF9090' }}>Red card</td><td style={{ fontWeight: 600, fontFamily: 'var(--mono)', color: '#FF9090' }}>-2 pts</td></tr>
               </tbody></table>
             </div>
             <div className="card">

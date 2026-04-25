@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { DubUpLogoLarge } from '../components/DubUpLogo'
 import { useAuth } from '../hooks/useAuth'
+import { supabase } from '../lib/supabase'
 
 export default function AuthPage() {
   const { signIn, signUp } = useAuth()
@@ -14,6 +15,11 @@ export default function AuthPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  const [refCode, setRefCode] = useState(() => {
+    // Read referral code from URL params
+    const params = new URLSearchParams(window.location.search)
+    return params.get('ref') || ''
+  })
 
   async function handleReset() {
     if (!email) { setError('Enter your email address first'); return }
@@ -35,9 +41,20 @@ export default function AuthPage() {
         if (error) setError(error.message)
       } else {
         if (!agreedToTerms) { setError('Please accept the Terms of Service to continue'); setLoading(false); return }
-        const { error } = await signUp(email, password, { data: { username } })
-        if (error) setError(error.message)
-        else setSuccess('Account created! Check your email to confirm, then log in.')
+        const { error, data } = await signUp(email, password, { data: { username } })
+        if (error) { setError(error.message) }
+        else {
+          // Track referral if code was used
+          if (refCode && data?.user) {
+            // Find referrer and increment their count
+            const { data: referrer } = await supabase
+              .from('profiles').select('id, referral_count').eq('referral_code', refCode.toUpperCase()).single()
+            if (referrer) {
+              await supabase.from('profiles').update({ referral_count: (referrer.referral_count || 0) + 1 }).eq('id', referrer.id)
+            }
+          }
+          setSuccess('Account created! Check your email to confirm, then log in.')
+        }
       }
     } finally {
       setLoading(false)

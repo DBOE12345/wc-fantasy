@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import DubUpLogo, { DubUpLogoLarge } from '../components/DubUpLogo'
 import stackedImg from '../assets/dubup-logo-stacked.png'
+import iconImg from '../assets/dubup-logo-icon.png'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
@@ -143,10 +144,10 @@ export default function WelcomePage() {
             onClick={e => e.stopPropagation()}
           >
             {/* Menu header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
-              <img src={stackedImg} alt="DubUp Fantasy" style={{ width: 'min(300px, 75vw)', height: 'auto', objectFit: 'contain' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28, paddingBottom: 18, borderBottom: '1px solid var(--border)' }}>
+              <img src={iconImg} alt="DubUp" style={{ width: 44, height: 44, objectFit: 'contain', flexShrink: 0 }} />
               <div>
-                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 18, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 18, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text)' }}>
                   <span style={{ color: 'var(--clay)' }}>DUB</span>UP
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.1em' }}>Fantasy</div>

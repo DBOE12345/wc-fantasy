@@ -4,6 +4,56 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { DubUpLogoHorizontal } from '../components/DubUpLogo'
 
+function LeagueHistory({ userId }) {
+  const [leagues, setLeagues] = useState([])
+  const [loading, setLoading] = useState(true)
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    async function load() {
+      const { data } = await supabase
+        .from('league_members')
+        .select('league_id, pts, leagues(id, name, code, size, draft_pos, draft_started, created_at)')
+        .eq('user_id', userId)
+        .order('created_at', { foreignTable: 'leagues', ascending: false })
+      setLeagues(data?.map(d => ({ ...d.leagues, myPts: d.pts })).filter(Boolean) || [])
+      setLoading(false)
+    }
+    load()
+  }, [userId])
+
+  if (loading) return null
+  if (leagues.length === 0) return null
+
+  return (
+    <div style={{ marginTop: '0.5rem' }}>
+      <div className="card-title">League History</div>
+      {leagues.map(l => {
+        const isDone = l.draft_pos >= (48 / l.size) * l.size
+        const isLive = l.draft_started && !isDone
+        return (
+          <div key={l.id} onClick={() => navigate('/league/' + l.id)} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: '13px 15px', marginBottom: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 9, background: isDone ? 'rgba(200,169,106,.12)' : 'var(--bg3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
+              {isDone ? '🏆' : isLive ? '⚽' : '📋'}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.name}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)', letterSpacing: '.1em' }}>{l.code}</span>
+                <span style={{ fontSize: 11, color: 'var(--text3)' }}>· {l.size} players</span>
+                {isDone && l.myPts > 0 && <span style={{ fontSize: 11, color: 'var(--clay-light)', fontWeight: 600 }}>{l.myPts} pts</span>}
+                {isDone && <span style={{ fontSize: 10, background: 'rgba(200,169,106,.1)', color: '#d4b87a', border: '1px solid rgba(200,169,106,.2)', borderRadius: 4, padding: '1px 6px', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase' }}>Done</span>}
+                {isLive && <span style={{ fontSize: 10, background: 'rgba(193,73,46,.12)', color: 'var(--clay-light)', border: '1px solid rgba(193,73,46,.2)', borderRadius: 4, padding: '1px 6px', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase' }}>Live</span>}
+              </div>
+            </div>
+            <span style={{ color: 'var(--text3)', fontSize: 16 }}>›</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function ProfilePage() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
@@ -138,9 +188,12 @@ export default function ProfilePage() {
           {saving ? 'Saving...' : 'Save changes'}
         </button>
 
-        <button className="btn btn-secondary" style={{ width: '100%' }} onClick={signOut}>
+        <button className="btn btn-secondary" style={{ width: '100%', marginBottom: '1.5rem' }} onClick={signOut}>
           Sign out
         </button>
+
+        {/* League History */}
+        <LeagueHistory userId={user.id} />
       </div>
     </div>
   )

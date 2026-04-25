@@ -7,6 +7,7 @@ import LeaguePage from './pages/LeaguePage'
 import ProfilePage from './pages/ProfilePage'
 import HowToPlayPage from './pages/HowToPlayPage'
 import TermsPage from './pages/TermsPage'
+import ReferralPage from './pages/ReferralPage'
 import './index.css'
 
 function ProtectedRoute({ children }) {
@@ -27,6 +28,7 @@ function AppRoutes() {
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
       <Route path="/how-to-play" element={<ProtectedRoute><HowToPlayPage /></ProtectedRoute>} />
       <Route path="/terms" element={<TermsPage />} />
+      <Route path="/referral" element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
