@@ -202,7 +202,7 @@ export default function LeaguePage() {
     const memsWithProfiles = await Promise.all((mems || []).map(async m => {
       const { data: profile } = await supabase
         .from('profiles').select('username, email, avatar_url, referral_count').eq('id', m.user_id).single()
-      return { ...m, profiles: profile || null }
+      return { ...m, profile: profile || null }
     }))
     
     setMembers(memsWithProfiles)
@@ -286,28 +286,28 @@ export default function LeaguePage() {
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}` }, (payload) => {
         const updated = payload.new
-        if (updated) {
-          setLeague(updated)
-          const nowStarted = !!updated.draft_started
-          setDraftStarted(prev => {
-            if (!prev && nowStarted && !didStartRef.current) {
-              try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
-            }
-            // Draft was restarted — clear all local state
-            if (prev && !nowStarted && updated.draft_pos === 0) {
-              setPicks({})
-              setPicksOrdered([])
-              setBracket(null)
-              setTimeLeft(PICK_TIMER)
-            }
-            return nowStarted
-          })
-          if (updated.bracket_data) {
-            try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
-          } else if (!updated.draft_started && updated.draft_pos === 0) {
-            // Draft was reset
-            setBracket(null)
+        if (!updated) return
+        setLeague(updated)
+        const nowStarted = !!updated.draft_started
+        const wasReset = !updated.draft_started && updated.draft_pos === 0
+
+        setDraftStarted(prev => {
+          // Play sound when draft transitions false → true
+          if (!prev && nowStarted && !didStartRef.current) {
+            try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
           }
+          return nowStarted
+        })
+
+        if (wasReset) {
+          // Draft was restarted — clear everything and reload
+          setPicks({})
+          setPicksOrdered([])
+          setBracket(null)
+          setTimeLeft(PICK_TIMER)
+          load() // full reload to sync picks too
+        } else if (updated.bracket_data) {
+          try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
         }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}` }, () => {
@@ -336,7 +336,11 @@ export default function LeaguePage() {
         setCountdown(null)
         // Auto-start the draft!
         if (!draftStarted) {
-          await supabase.from('leagues').update({ draft_started: true, bracket_data: null }).eq('id', id)
+          await supabase.from('leagues').update({
+            draft_started: true,
+            bracket_data: null,
+            pick_started_at: new Date().toISOString()
+          }).eq('id', id)
           setDraftStarted(true)
           didStartRef.current = true
           try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 100) } catch(e) {}
@@ -358,7 +362,7 @@ export default function LeaguePage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
 
-  // Timer - runs for everyone when draft is active, auto-picks when MY turn expires
+  // Timer - synced to server timestamp so all clients show same countdown
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current)
     const draftPos = league?.draft_pos || 0
@@ -366,12 +370,21 @@ export default function LeaguePage() {
     const whoseTurn = getTurn(draftPos, leagueSize)
     const draftDoneNow = draftPos >= (48 / leagueSize) * leagueSize || Object.keys(picks).length >= 48
     const isMyTurnNow = draftStarted && !draftDoneNow && whoseTurn === mySlot
-    // Always reset timer when turn changes
-    setTimeLeft(PICK_TIMER)
-    // Run clock for everyone when draft is active so all players see it ticking
-    if (!draftStarted || draftDoneNow) return
+
+    if (!draftStarted || draftDoneNow) {
+      setTimeLeft(PICK_TIMER)
+      return
+    }
+
+    // Calculate initial time from server timestamp if available
+    const pickStarted = league?.pick_started_at ? new Date(league.pick_started_at) : null
+    const elapsed = pickStarted ? Math.floor((Date.now() - pickStarted.getTime()) / 1000) : 0
+    const initialTime = Math.max(1, PICK_TIMER - elapsed)
+    setTimeLeft(initialTime)
+
     // Send notification when it becomes my turn
     if (isMyTurnNow) sendPickNotification()
+
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev === 10) {
@@ -432,7 +445,10 @@ export default function LeaguePage() {
               league_id: id, user_id: pickUserId, team_name: auto.n
             })
             if (!error) {
-              await supabase.from('leagues').update({ draft_pos: freshLeague.draft_pos + 1 }).eq('id', id)
+              await supabase.from('leagues').update({
+                draft_pos: freshLeague.draft_pos + 1,
+                pick_started_at: new Date().toISOString()
+              }).eq('id', id)
             }
           }, 100)
           return PICK_TIMER
@@ -441,7 +457,7 @@ export default function LeaguePage() {
       })
     }, 1000)
     return () => clearInterval(timerRef.current)
-  }, [league?.draft_pos, draftStarted, mySlot, league?.size])
+  }, [league?.draft_pos, league?.pick_started_at, draftStarted, mySlot, league?.size])
 
   async function makePick(teamName, isAuto = false) {
     if (!draftStarted) return
@@ -479,8 +495,12 @@ export default function LeaguePage() {
       setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
       playSound('pick')
 
-      // Advance draft by exactly 1
-      await supabase.from('leagues').update({ draft_pos: freshLeague.draft_pos + 1 }).eq('id', id)
+      // Advance draft by 1 AND record when this new turn started (for timer sync)
+      const newPos = freshLeague.draft_pos + 1
+      await supabase.from('leagues').update({
+        draft_pos: newPos,
+        pick_started_at: new Date().toISOString()
+      }).eq('id', id)
 
       // Check if complete
       const { count: totalCount } = await supabase
@@ -566,8 +586,13 @@ export default function LeaguePage() {
     if ('Notification' in window && Notification.permission === 'default') {
       await Notification.requestPermission()
     }
-    await supabase.from('leagues').update({ draft_started: true, bracket_data: null }).eq('id', id)
+    await supabase.from('leagues').update({
+      draft_started: true,
+      bracket_data: null,
+      pick_started_at: new Date().toISOString()
+    }).eq('id', id)
     setDraftStarted(true)
+    didStartRef.current = true
     setTimeout(() => playSound('draft_start'), 100)
   }
 
@@ -604,7 +629,7 @@ export default function LeaguePage() {
     if (!chatInput.trim() || sendingChat) return
     setSendingChat(true)
     const me = members.find(m => m.user_id === user.id)
-    const name = me?.profiles?.username || me?.profiles?.email?.split('@')[0] || 'Player'
+    const name = me?.profile?.username || me?.profile?.email?.split('@')[0] || 'Player'
     await supabase.from('chat_messages').insert({
       league_id: id,
       user_id: user.id,
@@ -624,7 +649,7 @@ export default function LeaguePage() {
   function getDisplayName(m) {
     if (!m) return 'TBD'
     // Try username first, then email prefix, then generic player number
-    const name = m.profiles?.username || m.profiles?.email?.split('@')[0]
+    const name = m.profile?.username || m.profile?.email?.split('@')[0]
     if (name && name.length > 2) return name
     return `Player ${(m.draft_slot ?? 0) + 1}`
   }
@@ -794,6 +819,7 @@ export default function LeaguePage() {
               { label: 'Refer Friends', icon: '🌍', action: () => { navigate('/referral'); setProfileMenuOpen(false) } },
               { label: 'Edit Profile', icon: '👤', action: () => { navigate('/profile'); setProfileMenuOpen(false) } },
               { label: 'How to Play', icon: '📖', action: () => { navigate('/how-to-play'); setProfileMenuOpen(false) } },
+              { label: 'Privacy Policy', icon: '🔒', action: () => { navigate('/privacy'); setProfileMenuOpen(false) } },
               { label: 'Sign Out', icon: '🚪', action: () => { signOut(); setProfileMenuOpen(false) }, danger: true },
             ].map(item => (
               <button key={item.label} onClick={item.action} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: item.danger ? '#FF9090' : 'var(--text)', textAlign: 'left', fontFamily: 'var(--font)' }}>
@@ -1194,9 +1220,15 @@ export default function LeaguePage() {
                     style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090', borderColor: 'rgba(255,75,75,.3)' }}
                     onClick={async () => {
                       if (!window.confirm('Restart the entire draft? ALL picks deleted, everyone starts over.')) return
-                      // Delete all picks first
+                      // Step 1: Clear local state immediately on commissioner's screen
+                      setPicks({})
+                      setPicksOrdered([])
+                      setBracket(null)
+                      setDraftStarted(false)
+                      setTimeLeft(PICK_TIMER)
+                      // Step 2: Delete all picks from DB
                       await supabase.from('picks').delete().eq('league_id', id)
-                      // Reset league state — real-time subscription will sync all clients
+                      // Step 3: Reset league — UPDATE subscription fires for all other clients
                       await supabase.from('leagues')
                         .update({ draft_pos: 0, draft_started: false, bracket_data: null })
                         .eq('id', id)
@@ -1602,8 +1634,8 @@ export default function LeaguePage() {
                           {msg.username}
                           {(isMe || isCommissioner) && (
                             <button onClick={async () => {
-                              await supabase.from('chat_messages').delete().eq('id', msg.id)
-                              setChatMessages(prev => prev.filter(m => m.id !== msg.id))
+                              const { error } = await supabase.from('chat_messages').delete().eq('id', msg.id)
+                              if (!error) setChatMessages(prev => prev.filter(m => m.id !== msg.id))
                             }} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 10, padding: '0 2px', lineHeight: 1 }}>✕</button>
                           )}
                         </div>
