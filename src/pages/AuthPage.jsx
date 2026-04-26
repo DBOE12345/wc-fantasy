@@ -7,7 +7,6 @@ export default function AuthPage() {
   const { signIn, signUp } = useAuth()
   const [mode, setMode] = useState('login')
   const [agreedToTerms, setAgreedToTerms] = useState(false)
-  const [resetSent, setResetSent] = useState(false)
   const [showTermsPopup, setShowTermsPopup] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -18,22 +17,9 @@ export default function AuthPage() {
   const [otpSent, setOtpSent] = useState(false)
   const [otpCode, setOtpCode] = useState('')
   const [pendingEmail, setPendingEmail] = useState('')
-  const [refCode, setRefCode] = useState(() => {
-    // Read referral code from URL params
-    const params = new URLSearchParams(window.location.search)
-    return params.get('ref') || ''
-  })
-
-  async function handleReset() {
-    if (!email) { setError('Enter your email address first'); return }
-    setLoading(true)
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin + '/auth'
-    })
-    setLoading(false)
-    if (error) setError(error.message)
-    else { setResetSent(true); setError('') }
-  }
+  const [resetMode, setResetMode] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
+  const [refCode] = useState(() => new URLSearchParams(window.location.search).get('ref') || '')
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -43,11 +29,12 @@ export default function AuthPage() {
         const { error } = await signIn(email, password)
         if (error) setError(error.message)
       } else {
-        if (!agreedToTerms) { setError('Please accept the Terms of Service to continue'); setLoading(false); return }
-        const { error, data } = await signUp(email, password, { data: { username } })
+        if (!username.trim()) { setError('Please enter a display name'); return }
+        if (!agreedToTerms) { setError('Please accept the Terms of Service'); return }
+        const { error, data } = await signUp(email, password, { data: { username: username.trim() } })
         if (error) { setError(error.message) }
         else {
-          // Track referral if code was used
+          // Track referral
           if (refCode && data?.user) {
             const { data: referrer } = await supabase
               .from('profiles').select('id, referral_count').eq('referral_code', refCode.toUpperCase()).single()
@@ -55,7 +42,6 @@ export default function AuthPage() {
               await supabase.from('profiles').update({ referral_count: (referrer.referral_count || 0) + 1 }).eq('id', referrer.id)
             }
           }
-          // Show OTP verification screen
           setPendingEmail(email)
           setOtpSent(true)
         }
@@ -79,10 +65,23 @@ export default function AuthPage() {
       setOtpSent(false)
       setSuccess('Email verified! You can now sign in.')
       setMode('login')
+      setOtpCode('')
     }
   }
 
-  // OTP verification screen
+  async function handlePasswordReset(e) {
+    e.preventDefault()
+    if (!email.trim()) { setError('Enter your email address'); return }
+    setLoading(true); setError('')
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: window.location.origin + '/auth',
+    })
+    setLoading(false)
+    if (error) setError(error.message)
+    else setResetSent(true)
+  }
+
+  // OTP screen
   if (otpSent) {
     return (
       <div className="auth-wrap">
@@ -111,14 +110,56 @@ export default function AuthPage() {
           <button className="btn btn-primary" style={{ width: '100%', marginBottom: 12 }} onClick={verifyOtp} disabled={loading || otpCode.length < 6}>
             {loading ? 'Verifying...' : 'Verify Email →'}
           </button>
-          <button className="btn btn-secondary" style={{ width: '100%', fontSize: 13 }} onClick={async () => {
+          <button className="btn btn-secondary" style={{ width: '100%', fontSize: 13, marginBottom: 12 }} onClick={async () => {
+            setLoading(true)
             await supabase.auth.resend({ type: 'signup', email: pendingEmail })
-            setError(''); setSuccess('New code sent!')
-          }}>
+            setLoading(false)
+            setError(''); setSuccess('New code sent! Check your email.')
+          }} disabled={loading}>
             Resend code
           </button>
-          <div style={{ textAlign: 'center', marginTop: 12 }}>
+          {success && <div className="success-msg">{success}</div>}
+          <div style={{ textAlign: 'center', marginTop: 8 }}>
             <span onClick={() => setOtpSent(false)} style={{ fontSize: 13, color: 'var(--text3)', cursor: 'pointer' }}>← Back to sign up</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Password reset screen
+  if (resetMode) {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card">
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+            <DubUpLogoLarge size={140} />
+          </div>
+          {!resetSent ? (
+            <>
+              <div className="auth-title" style={{ textAlign: 'center', marginBottom: 4 }}>Reset Password</div>
+              <div className="auth-sub" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>Enter your email and we'll send you a reset link</div>
+              {error && <div className="error-msg">{error}</div>}
+              <form onSubmit={handlePasswordReset}>
+                <div className="form-group">
+                  <label className="form-label">Email</label>
+                  <input className="input" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
+                </div>
+                <button className="btn btn-primary" style={{ width: '100%' }} type="submit" disabled={loading}>
+                  {loading ? 'Sending...' : 'Send reset link'}
+                </button>
+              </form>
+            </>
+          ) : (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>✉️</div>
+              <div className="auth-title" style={{ fontSize: 18, marginBottom: 8 }}>Check your email</div>
+              <div className="auth-sub">We sent a password reset link to<br/><strong style={{ color: 'var(--text)' }}>{email}</strong></div>
+              <div style={{ fontSize: 13, color: 'var(--text3)', marginTop: 12 }}>Click the link in the email to reset your password, then come back to sign in.</div>
+            </div>
+          )}
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <span onClick={() => { setResetMode(false); setResetSent(false); setError('') }} style={{ fontSize: 13, color: 'var(--text3)', cursor: 'pointer' }}>← Back to sign in</span>
           </div>
         </div>
       </div>
@@ -127,7 +168,7 @@ export default function AuthPage() {
 
   return (
     <div className="auth-wrap">
-      {/* Terms of Service Popup */}
+      {/* Terms popup */}
       {showTermsPopup && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.85)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: '1rem' }} onClick={() => setShowTermsPopup(false)}>
           <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '16px 16px 0 0', padding: '1.5rem', width: '100%', maxWidth: 500, maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
@@ -142,7 +183,7 @@ export default function AuthPage() {
               { title: '4. Your Account', body: 'You are responsible for your account credentials. Do not share your account. We may suspend accounts that violate these terms.' },
               { title: '5. Privacy', body: 'We collect your email and profile info you provide. We do not sell your data. Data is stored securely. By using the app you consent to this.' },
               { title: '6. User Content', body: 'You own your content (profile photos, chat messages). By posting, you grant us license to display it in the app. No offensive, illegal, or harmful content.' },
-              { title: '7. No Warranties', body: 'The app is provided as-is. We do not guarantee uninterrupted service or error-free operation. Point calculations are based on available data and may occasionally be delayed.' },
+              { title: '7. No Warranties', body: 'The app is provided as-is. We do not guarantee uninterrupted service or error-free operation.' },
               { title: '8. Limitation of Liability', body: 'DubUp Fantasy and its creators are not liable for any damages from your use of the app.' },
               { title: '9. Changes', body: 'We may update these terms. Continued use after changes means you accept the new terms.' },
             ].map(s => (
@@ -151,18 +192,17 @@ export default function AuthPage() {
                 <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6 }}>{s.body}</div>
               </div>
             ))}
-            <button className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} onClick={() => { setAgreedToTerms(true); setShowTermsPopup(false) }}>
-              I Agree
-            </button>
+            <button className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} onClick={() => { setAgreedToTerms(true); setShowTermsPopup(false) }}>I Agree</button>
           </div>
         </div>
       )}
+
       <div className="auth-card">
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
           <DubUpLogoLarge size={140} />
         </div>
 
-        <p className="auth-sub">{mode === 'login' ? 'Sign in to your league' : 'Create your account'}</p>
+        <p className="auth-sub" style={{ textAlign: 'center' }}>{mode === 'login' ? 'Sign in to your league' : 'Create your account'}</p>
 
         {error && <div className="error-msg">{error}</div>}
         {success && <div className="success-msg">{success}</div>}
@@ -171,27 +211,21 @@ export default function AuthPage() {
           {mode === 'signup' && (
             <div className="form-group">
               <label className="form-label">Display name</label>
-              <input className="input" type="text" placeholder="How you'll appear in the league" value={username} onChange={e => setUsername(e.target.value)} required />
+              <input className="input" type="text" placeholder="How you'll appear in leagues" value={username} onChange={e => setUsername(e.target.value)} required />
             </div>
           )}
           <div className="form-group">
             <label className="form-label">Email</label>
             <input className="input" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
           </div>
-          <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+          <div className="form-group" style={{ marginBottom: '1.25rem' }}>
             <label className="form-label">Password</label>
             <input className="input" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
           </div>
-          {/* Terms checkbox for signup - inside form above button */}
+
           {mode === 'signup' && (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: '1rem' }}>
-              <input
-                type="checkbox"
-                id="terms"
-                checked={agreedToTerms}
-                onChange={e => setAgreedToTerms(e.target.checked)}
-                style={{ marginTop: 3, accentColor: 'var(--clay)', width: 16, height: 16, flexShrink: 0 }}
-              />
+              <input type="checkbox" id="terms" checked={agreedToTerms} onChange={e => setAgreedToTerms(e.target.checked)} style={{ marginTop: 3, accentColor: 'var(--clay)', width: 16, height: 16, flexShrink: 0 }} />
               <label htmlFor="terms" style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5, cursor: 'pointer' }}>
                 I agree to the <span onClick={() => setShowTermsPopup(true)} style={{ color: 'var(--clay)', cursor: 'pointer', textDecoration: 'underline' }}>Terms of Service</span>. DubUp Fantasy is not affiliated with FIFA.
               </label>
@@ -202,31 +236,25 @@ export default function AuthPage() {
             {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
           </button>
 
-          {/* Forgot password - below sign in button */}
           {mode === 'login' && (
             <div style={{ textAlign: 'center', marginTop: 14 }}>
-              <span
-                onClick={handleReset}
-                style={{ fontSize: 13, color: 'var(--text2)', cursor: 'pointer', textDecoration: 'underline' }}
-              >
+              <span onClick={() => { setResetMode(true); setError('') }} style={{ fontSize: 13, color: 'var(--text2)', cursor: 'pointer', textDecoration: 'underline' }}>
                 Forgot password?
               </span>
             </div>
           )}
         </form>
 
-        {resetSent && (
-          <div className="success-msg" style={{ marginBottom: 12 }}>
-            Password reset email sent! Check your inbox.
-          </div>
-        )}
-
         <div className="auth-switch">
           {mode === 'login' ? (
-            <>Don't have an account? <a onClick={() => setMode('signup')}>Sign up</a></>
+            <>Don't have an account? <a onClick={() => { setMode('signup'); setError(''); setSuccess('') }}>Sign up</a></>
           ) : (
-            <>Already have an account? <a onClick={() => setMode('login')}>Sign in</a></>
+            <>Already have an account? <a onClick={() => { setMode('login'); setError(''); setSuccess('') }}>Sign in</a></>
           )}
+        </div>
+        <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', justifyContent: 'center', gap: 16 }}>
+          <a href="/terms" style={{ fontSize: 11, color: 'var(--text3)', textDecoration: 'none' }}>Terms of Service</a>
+          <a href="/privacy" style={{ fontSize: 11, color: 'var(--text3)', textDecoration: 'none' }}>Privacy Policy</a>
         </div>
       </div>
     </div>

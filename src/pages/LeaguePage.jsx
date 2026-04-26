@@ -310,8 +310,18 @@ export default function LeaguePage() {
           }
         }
       })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}` }, () => {
+        // Draft order changed — reload all members to sync draft slots for everyone
+        load()
+      })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}` }, (payload) => {
         if (payload.new) setChatMessages(prev => [...prev, payload.new])
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}` }, () => {
+        // Chat cleared — reload messages
+        supabase.from('chat_messages').select('*').eq('league_id', id).order('created_at').then(({ data }) => {
+          setChatMessages(data || [])
+        })
       })
       .subscribe()
     return () => supabase.removeChannel(channel)
@@ -864,8 +874,11 @@ export default function LeaguePage() {
               {rankedMembers.map((m, i) => (
                 <div key={m.id} className="row" onClick={() => setSelectedPlayer(m)} style={{ cursor: 'pointer' }}>
                   <span style={{ fontSize: 13, color: 'var(--text3)', minWidth: 20, fontWeight: 500 }}>{i + 1}</span>
-                  <div className="avatar" style={{ background: AV_BG[m.draft_slot % 8], color: AV_FG[m.draft_slot % 8] }}>
-                    {getDisplayName(m).slice(0, 2).toUpperCase()}
+                  <div className="avatar" style={{ background: m.profile?.avatar_url ? 'transparent' : AV_BG[m.draft_slot % 8], color: AV_FG[m.draft_slot % 8], overflow: 'hidden' }}>
+                    {m.profile?.avatar_url
+                      ? <img src={m.profile.avatar_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : getDisplayName(m).slice(0, 2).toUpperCase()
+                    }
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -1093,6 +1106,51 @@ export default function LeaguePage() {
                   </div>
                 </div>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 700, color: timerColor }}>{timeLeft}s</div>
+              </div>
+            )}
+
+            {/* YOUR TURN banner */}
+            {draftStarted && !draftDone && isMyTurn && (
+              <div style={{
+                background: 'rgba(193,73,46,.12)',
+                border: '2px solid var(--clay)',
+                borderRadius: 12,
+                padding: '14px 16px',
+                marginBottom: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                animation: 'pulse 1.5s infinite',
+              }}>
+                <div style={{ fontSize: 28 }}>⚽</div>
+                <div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 16, color: 'var(--clay-light)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Your Pick!</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>Tap a team below — {timeLeft}s remaining</div>
+                </div>
+                <div style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 900, color: timeLeft <= 10 ? '#FF9090' : 'var(--clay-light)' }}>{timeLeft}</div>
+              </div>
+            )}
+
+            {/* Waiting for others banner */}
+            {draftStarted && !draftDone && !isMyTurn && (
+              <div style={{
+                background: 'var(--bg3)',
+                border: '1px solid var(--border)',
+                borderRadius: 12,
+                padding: '12px 16px',
+                marginBottom: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+              }}>
+                <div style={{ fontSize: 20 }}>⏳</div>
+                <div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                    {getDisplayName(members.find(m => m.draft_slot === currentTurn))}'s turn
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{timeLeft}s remaining</div>
+                </div>
+                <div style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 22, fontWeight: 700, color: timeLeft <= 10 ? '#FF9090' : 'var(--text3)' }}>{timeLeft}</div>
               </div>
             )}
 
@@ -1514,7 +1572,20 @@ export default function LeaguePage() {
         {/* CHAT TAB */}
         {tab === 'chat' && (
           <>
-            <h2 style={{ fontSize: 20, fontWeight: 900, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: ".02em", marginBottom: 4 }}>League Chat</h2>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 900, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: ".02em" }}>League Chat</h2>
+              {isCommissioner && chatMessages.length > 0 && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 11, padding: '5px 10px', color: '#FF9090', borderColor: 'rgba(255,75,75,.25)' }}
+                  onClick={async () => {
+                    if (!window.confirm('Clear all chat messages?')) return
+                    await supabase.from('chat_messages').delete().eq('league_id', id)
+                    setChatMessages([])
+                  }}
+                >🗑 Clear chat</button>
+              )}
+            </div>
             <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: '1.5rem' }}>Talk trash, celebrate picks, and hype each other up</p>
             <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, display: 'flex', flexDirection: 'column', height: 400 }}>
               <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1527,7 +1598,15 @@ export default function LeaguePage() {
                     const isMe = msg.user_id === user.id
                     return (
                       <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 3 }}>{msg.username}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {msg.username}
+                          {(isMe || isCommissioner) && (
+                            <button onClick={async () => {
+                              await supabase.from('chat_messages').delete().eq('id', msg.id)
+                              setChatMessages(prev => prev.filter(m => m.id !== msg.id))
+                            }} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 10, padding: '0 2px', lineHeight: 1 }}>✕</button>
+                          )}
+                        </div>
                         <div style={{
                           background: isMe ? 'rgba(29,158,117,.2)' : 'var(--bg3)',
                           border: `1px solid ${isMe ? 'rgba(29,158,117,.3)' : 'var(--border)'}`,
