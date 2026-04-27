@@ -182,6 +182,8 @@ export default function LeaguePage() {
   const timerRef = useRef(null)
   const pickingRef = useRef(false) // prevents double picks
 
+  const mySlotRef = useRef(null)
+  useEffect(() => { mySlotRef.current = mySlot }, [mySlot])
   const navigateRef = useRef(navigate)
   useEffect(() => { navigateRef.current = navigate }, [navigate])
 
@@ -562,19 +564,19 @@ export default function LeaguePage() {
   }, [league?.draft_pos, league?.pick_started_at, draftStarted, mySlot, league?.size])
 
   async function makePick(teamName) {
-    // Guards
+    // Hard block - if already picking, stop immediately
     if (!draftStarted) return
     if (mySlot === null) return
     if (pickingRef.current) return
-    pickingRef.current = true
+    pickingRef.current = true  // LOCK immediately, before any async
 
     try {
-      // Get fresh league state from DB every time
+      // Get fresh state from DB
       const { data: lg } = await supabase
         .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
       if (!lg?.draft_started) return
 
-      // Verify it's actually this player's turn
+      // Check it's actually this player's turn
       const turn = getTurn(lg.draft_pos, lg.size)
       if (turn !== mySlot) return
 
@@ -586,7 +588,7 @@ export default function LeaguePage() {
         .eq('league_id', id).eq('team_name', teamName)
       if (taken > 0) return
 
-      // Check this player hasn't exceeded their picks
+      // Check player pick count against tpp
       const { count: myCount } = await supabase
         .from('picks').select('id', { count: 'exact', head: true })
         .eq('league_id', id).eq('user_id', user.id)
@@ -598,28 +600,31 @@ export default function LeaguePage() {
       })
       if (error) return
 
-      // Update local state immediately so UI responds fast
+      // Update local picks state
       setPicks(prev => ({ ...prev, [teamName]: user.id }))
       setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
       playSound('pick')
 
-      // Advance turn in DB - also update local league state immediately
-      // so isMyTurn becomes false right away and player cant pick again
+      // Advance draft_pos — update local league state immediately so isMyTurn = false RIGHT NOW
       const newPos = lg.draft_pos + 1
-      const isDone = newPos >= tpp * lg.size
-      setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
+      setLeague(prev => {
+        if (!prev) return prev
+        return { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() }
+      })
 
+      // Write to DB — triggers real-time for all other players
       await supabase.from('leagues').update({
         draft_pos: newPos,
         pick_started_at: new Date().toISOString()
       }).eq('id', id)
 
-      if (isDone) {
+      if (newPos >= tpp * lg.size) {
         setDraftComplete(true)
         playSound('complete')
       }
 
     } finally {
+      // Only release lock AFTER DB is updated — prevents any pick until turn is confirmed advanced
       pickingRef.current = false
     }
   }
