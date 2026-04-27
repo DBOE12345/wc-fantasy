@@ -294,41 +294,39 @@ export default function LeaguePage() {
     .on('postgres_changes', {
       event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}`
     }, (payload) => {
-      // Fetch fresh from DB to guarantee complete data
-      supabase.from('leagues').select('*').eq('id', id).single()
-        .then(({ data: updated }) => {
-          if (!updated) return
+      // Use payload.new directly - it contains the committed values
+      const updated = payload.new
+      if (!updated || !updated.id) return
 
-          setLeague(updated)
-          draftPosRef.current = updated.draft_pos || 0
+      setLeague(prev => ({ ...prev, ...updated }))
+      draftPosRef.current = updated.draft_pos || 0
 
-          const nowStarted = !!updated.draft_started
-          const wasReset = !updated.draft_started && updated.draft_pos === 0
+      const nowStarted = !!updated.draft_started
+      const wasReset = !updated.draft_started && updated.draft_pos === 0
 
-          if (wasReset) {
-            setPicks({})
-            setPicksOrdered([])
-            setBracket(null)
-            setDraftStarted(false)
-            setDraftComplete(false)
-            setTimeLeft(PICK_TIMER)
-            setScheduledTime('')
-            setTab('league')
-            return
-          }
+      if (wasReset) {
+        setPicks({})
+        setPicksOrdered([])
+        setBracket(null)
+        setDraftStarted(false)
+        setDraftComplete(false)
+        setTimeLeft(PICK_TIMER)
+        setScheduledTime('')
+        setTab('league')
+        return
+      }
 
-          setDraftStarted(prev => {
-            if (!prev && nowStarted && !didStartRef.current) {
-              try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
-              setTimeout(() => setTab('draft'), 500)
-            }
-            return nowStarted
-          })
+      setDraftStarted(prev => {
+        if (!prev && nowStarted && !didStartRef.current) {
+          try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
+          setTimeout(() => setTab('draft'), 500)
+        }
+        return nowStarted
+      })
 
-          if (updated.bracket_data) {
-            try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
-          }
-        })
+      if (updated.bracket_data) {
+        try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+      }
     })
 
     // LEAGUE_MEMBERS - INSERT: new player joined
@@ -442,7 +440,7 @@ export default function LeaguePage() {
   // Timer - synced to server timestamp so all clients show same countdown
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current)
-    const draftPos = league?.draft_pos || 0
+    const draftPos = Math.max(league?.draft_pos || 0, picksOrdered.length)
     const leagueSize = league?.size || 4
     const whoseTurn = getTurn(draftPos, leagueSize)
     const draftDoneNow = draftPos >= (48 / leagueSize) * leagueSize || Object.keys(picks).length >= 48
@@ -526,7 +524,7 @@ export default function LeaguePage() {
       })
     }, 1000)
     return () => clearInterval(timerRef.current)
-  }, [league?.draft_pos, league?.pick_started_at, draftStarted, mySlot, league?.size])
+  }, [league?.draft_pos, league?.pick_started_at, draftStarted, mySlot, league?.size, picksOrdered.length])
 
   async function makePick(teamName) {
     if (!draftStarted) return
@@ -535,44 +533,39 @@ export default function LeaguePage() {
     pickingRef.current = true
 
     try {
-      // Fresh state from DB every time
       const { data: lg } = await supabase
         .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
       if (!lg?.draft_started) return
 
-      // Must be this player's turn
-      const turn = getTurn(lg.draft_pos, lg.size)
+      // Use the higher of DB draft_pos or actual pick count
+      const effectivePos = Math.max(lg.draft_pos, picksOrdered.length)
+      const turn = getTurn(effectivePos, lg.size)
       if (turn !== mySlot) return
 
       const tpp = 48 / lg.size
 
-      // Team must not be taken
       const { count: taken } = await supabase
         .from('picks').select('id', { count: 'exact', head: true })
         .eq('league_id', id).eq('team_name', teamName)
       if (taken > 0) return
 
-      // Player must not exceed their allotment
       const { count: myCount } = await supabase
         .from('picks').select('id', { count: 'exact', head: true })
         .eq('league_id', id).eq('user_id', user.id)
       if (myCount >= tpp) return
 
-      // Insert pick
       const { error } = await supabase.from('picks').insert({
         league_id: id, user_id: user.id, team_name: teamName
       })
       if (error) return
 
-      // Update local state immediately so UI responds
-      const newPos = lg.draft_pos + 1
+      const newPos = effectivePos + 1
       draftPosRef.current = newPos
       setPicks(prev => ({ ...prev, [teamName]: user.id }))
       setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
       setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
       playSound('pick')
 
-      // Advance in DB — triggers real-time for all players
       await supabase.from('leagues').update({
         draft_pos: newPos,
         pick_started_at: new Date().toISOString()
@@ -753,7 +746,10 @@ export default function LeaguePage() {
 
   const tpp = 48 / (league?.size || 4)
   const order = snakeOrder(league?.size || 4, 48)
-  const draftPos = league?.draft_pos || 0
+  // Use picksOrdered.length as the source of truth for whose turn it is
+  // This is more reliable than league.draft_pos because picks INSERT
+  // real-time fires correctly on all devices
+  const draftPos = Math.max(league?.draft_pos || 0, picksOrdered.length)
   const currentTurn = order[draftPos]
   const isMyTurn = currentTurn === mySlot
   const draftDone = draftDoneCalc
