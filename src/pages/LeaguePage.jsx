@@ -228,12 +228,8 @@ export default function LeaguePage() {
     setPicks(pickMap)
     setPicksOrdered(pickData || [])
 
-    // Set draft started state
-    const actuallyStarted = !!lg.draft_started && (lg.draft_pos > 0 || (pickData?.length || 0) > 0)
-    setDraftStarted(actuallyStarted)
-    if (!!lg.draft_started && !actuallyStarted) {
-      await supabase.from('leagues').update({ draft_started: false, draft_pos: 0 }).eq('id', lg.id)
-    }
+    // Set draft started state - trust the DB value
+    setDraftStarted(!!lg.draft_started)
 
     // Bracket
     if (lg.bracket_data) {
@@ -264,25 +260,6 @@ export default function LeaguePage() {
 
   useEffect(() => {
     load()
-
-    // Polling fallback — every 8 seconds do a lightweight check
-    // This ensures sync even if real-time events are missed
-    const pollInterval = setInterval(() => {
-      supabase.from('leagues').select('draft_pos, draft_started, size, pick_started_at').eq('id', id).single()
-        .then(({ data }) => {
-          if (!data) return
-          setLeague(prev => {
-            if (!prev) return data
-            // Only update if something actually changed
-            if (prev.draft_pos !== data.draft_pos ||
-                prev.draft_started !== data.draft_started ||
-                prev.pick_started_at !== data.pick_started_at) {
-              return { ...prev, ...data }
-            }
-            return prev
-          })
-        })
-    }, 5000)
 
     const channel = supabase.channel(`league_${id}`, {
       config: { broadcast: { self: true } }
@@ -421,7 +398,6 @@ export default function LeaguePage() {
     })
 
     return () => {
-      clearInterval(pollInterval)
       supabase.removeChannel(channel)
     }
   }, [load, id])
@@ -508,76 +484,40 @@ export default function LeaguePage() {
         }
         if (prev <= 1) {
           clearInterval(timerRef.current)
-          // Time ran out — auto pick
+          // Timer expired — only pick for MYSELF if it's my turn
           setTimeout(async () => {
             const { data: freshLeague } = await supabase
               .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
             if (!freshLeague?.draft_started) return
-
-            const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
-            const { data: members2 } = await supabase
-              .from('league_members').select('user_id, draft_slot').eq('league_id', id)
-            const turnMember = members2?.find(m => m.draft_slot === whoseTurn)
-
-            // Primary: if it's my turn, I pick for myself immediately
-            if (whoseTurn === mySlot) {
-              const { data: existingPicks } = await supabase
-                .from('picks').select('team_name').eq('league_id', id)
-              const takenNames = new Set(existingPicks?.map(p => p.team_name) || [])
-              const available = TEAMS.filter(t => !takenNames.has(t.n))
-              if (!available.length) return
-              const auto = available[Math.floor(Math.random() * available.length)]
-              const tpp = 48 / freshLeague.size
-              const { count: myCount } = await supabase
-                .from('picks').select('id', { count: 'exact', head: true })
-                .eq('league_id', id).eq('user_id', user.id)
-              if ((myCount || 0) >= tpp) return
-              const { error } = await supabase.from('picks').insert({
-                league_id: id, user_id: user.id, team_name: auto.n
-              })
-              if (!error) {
-                setLeague(prev => prev ? { ...prev, draft_pos: freshLeague.draft_pos + 1, pick_started_at: new Date().toISOString() } : prev)
-                await supabase.from('leagues').update({
-                  draft_pos: freshLeague.draft_pos + 1,
-                  pick_started_at: new Date().toISOString()
-                }).eq('id', id)
-              }
-              return
+            // Only fire if it is actually MY turn right now
+            if (getTurn(freshLeague.draft_pos, freshLeague.size) !== mySlot) return
+            // Pick random available team for myself
+            const { data: existingPicks } = await supabase
+              .from('picks').select('team_name').eq('league_id', id)
+            const takenNames = new Set(existingPicks?.map(p => p.team_name) || [])
+            const available = TEAMS.filter(t => !takenNames.has(t.n))
+            if (!available.length) return
+            const auto = available[Math.floor(Math.random() * available.length)]
+            const tpp = 48 / freshLeague.size
+            const { count: myCount } = await supabase
+              .from('picks').select('id', { count: 'exact', head: true })
+              .eq('league_id', id).eq('user_id', user.id)
+            if ((myCount || 0) >= tpp) return
+            if (pickingRef.current) return
+            pickingRef.current = true
+            const { error } = await supabase.from('picks').insert({
+              league_id: id, user_id: user.id, team_name: auto.n
+            })
+            if (!error) {
+              const newPos = freshLeague.draft_pos + 1
+              draftPosRef.current = newPos
+              setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
+              await supabase.from('leagues').update({
+                draft_pos: newPos,
+                pick_started_at: new Date().toISOString()
+              }).eq('id', id)
             }
-
-            // Fallback: if it's NOT my turn but the current player seems offline,
-            // wait 5 extra seconds then pick for them (prevents draft from getting stuck)
-            // Only slot 0 does this to avoid duplicate picks
-            if (mySlot === 0) {
-              await new Promise(r => setTimeout(r, 5000))
-              // Re-check — did someone already pick?
-              const { data: recheckLeague } = await supabase
-                .from('leagues').select('draft_pos').eq('id', id).single()
-              if (!recheckLeague || recheckLeague.draft_pos !== freshLeague.draft_pos) return // already advanced
-              // Pick for the absent player
-              const { data: existingPicks } = await supabase
-                .from('picks').select('team_name').eq('league_id', id)
-              const takenNames = new Set(existingPicks?.map(p => p.team_name) || [])
-              const available = TEAMS.filter(t => !takenNames.has(t.n))
-              if (!available.length) return
-              const auto = available[Math.floor(Math.random() * available.length)]
-              const tpp = 48 / freshLeague.size
-              const absentUserId = turnMember?.user_id
-              if (!absentUserId) return
-              const { count: theirCount } = await supabase
-                .from('picks').select('id', { count: 'exact', head: true })
-                .eq('league_id', id).eq('user_id', absentUserId)
-              if ((theirCount || 0) >= tpp) return
-              const { error } = await supabase.from('picks').insert({
-                league_id: id, user_id: absentUserId, team_name: auto.n
-              })
-              if (!error) {
-                await supabase.from('leagues').update({
-                  draft_pos: freshLeague.draft_pos + 1,
-                  pick_started_at: new Date().toISOString()
-                }).eq('id', id)
-              }
-            }
+            pickingRef.current = false
           }, 100)
           return PICK_TIMER
         }
