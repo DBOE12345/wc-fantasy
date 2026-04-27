@@ -261,70 +261,138 @@ export default function LeaguePage() {
 
   useEffect(() => {
     load()
-    const channel = supabase.channel(`league_${id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, (payload) => {
-        const newPick = payload.new
-        if (newPick) {
-          setPicks(prev => ({ ...prev, [newPick.team_name]: newPick.user_id }))
-          setPicksOrdered(prev => [...prev, newPick])
-          setTimeLeft(PICK_TIMER)
-        }
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, (payload) => {
-        // Pick was reversed — remove from local state AND reload to ensure full sync on all devices
-        const deleted = payload.old
-        if (deleted?.team_name) {
-          setPicks(prev => {
-            const next = { ...prev }
-            delete next[deleted.team_name]
-            return next
+
+    // Polling fallback — every 8 seconds do a lightweight check
+    // This ensures sync even if real-time events are missed
+    const pollInterval = setInterval(() => {
+      supabase.from('leagues').select('draft_pos, draft_started, size, pick_started_at').eq('id', id).single()
+        .then(({ data }) => {
+          if (!data) return
+          setLeague(prev => {
+            if (!prev) return data
+            // Only update if something actually changed
+            if (prev.draft_pos !== data.draft_pos ||
+                prev.draft_started !== data.draft_started ||
+                prev.pick_started_at !== data.pick_started_at) {
+              return { ...prev, ...data }
+            }
+            return prev
           })
-          setPicksOrdered(prev => prev.filter(p => p.team_name !== deleted.team_name))
-        }
-        // Full reload ensures phone and all other clients are in sync
-        load()
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}` }, (payload) => {
-        const updated = payload.new
-        if (!updated) return
-        setLeague(updated)
-        const nowStarted = !!updated.draft_started
-        const wasReset = !updated.draft_started && updated.draft_pos === 0
-
-        setDraftStarted(prev => {
-          // Play sound when draft transitions false → true
-          if (!prev && nowStarted && !didStartRef.current) {
-            try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
-          }
-          return nowStarted
         })
+    }, 8000)
 
-        if (wasReset) {
-          // Draft was restarted — clear everything and reload
-          setPicks({})
-          setPicksOrdered([])
-          setBracket(null)
-          setTimeLeft(PICK_TIMER)
-          load() // full reload to sync picks too
-        } else if (updated.bracket_data) {
-          try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+    const channel = supabase.channel(`league_${id}`, {
+      config: { broadcast: { self: true } }
+    })
+
+    // PICKS - INSERT: new pick made by anyone
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'picks', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      const newPick = payload.new
+      if (!newPick) return
+      setPicks(prev => ({ ...prev, [newPick.team_name]: newPick.user_id }))
+      setPicksOrdered(prev => {
+        if (prev.some(p => p.team_name === newPick.team_name)) return prev
+        return [...prev, newPick]
+      })
+      playSound('pick')
+    })
+
+    // PICKS - DELETE: pick reversed
+    .on('postgres_changes', {
+      event: 'DELETE', schema: 'public', table: 'picks', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      const deleted = payload.old
+      if (deleted?.team_name) {
+        setPicks(prev => { const n = { ...prev }; delete n[deleted.team_name]; return n })
+        setPicksOrdered(prev => prev.filter(p => p.team_name !== deleted.team_name))
+      }
+      load()
+    })
+
+    // LEAGUE - UPDATE
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}`
+    }, (payload) => {
+      const updated = payload.new
+      if (!updated) return
+      setLeague(updated)
+      const nowStarted = !!updated.draft_started
+      const wasReset = !updated.draft_started && updated.draft_pos === 0
+
+      setDraftStarted(prev => {
+        if (!prev && nowStarted && !didStartRef.current) {
+          try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
+          // Switch all players to draft tab when draft starts
+          setTimeout(() => setTab('draft'), 500)
         }
+        return nowStarted
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}` }, () => {
-        // Draft order changed — reload all members to sync draft slots for everyone
+
+      if (wasReset) {
+        setPicks({})
+        setPicksOrdered([])
+        setBracket(null)
+        setDraftStarted(false)
+        setTimeLeft(PICK_TIMER)
         load()
+        return
+      }
+
+      if (updated.bracket_data) {
+        try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+      }
+    })
+
+    // LEAGUE_MEMBERS - INSERT: new player joined the league
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}`
+    }, () => {
+      // Someone new joined — reload members list so leaderboard updates
+      load()
+    })
+
+    // LEAGUE_MEMBERS - UPDATE: draft order changed
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}`
+    }, () => {
+      load()
+    })
+
+    // CHAT - INSERT
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      if (payload.new) setChatMessages(prev => {
+        if (prev.some(m => m.id === payload.new.id)) return prev
+        return [...prev, payload.new]
       })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}` }, (payload) => {
-        if (payload.new) setChatMessages(prev => [...prev, payload.new])
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}` }, () => {
-        // Chat cleared — reload messages
-        supabase.from('chat_messages').select('*').eq('league_id', id).order('created_at').then(({ data }) => {
-          setChatMessages(data || [])
-        })
-      })
-      .subscribe()
-    return () => supabase.removeChannel(channel)
+    })
+
+    // CHAT - DELETE
+    .on('postgres_changes', {
+      event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      if (payload.old?.id) {
+        setChatMessages(prev => prev.filter(m => m.id !== payload.old.id))
+      } else {
+        setChatMessages([])
+      }
+    })
+
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('✅ Realtime connected')
+      } else {
+        console.log('Realtime status:', status)
+      }
+    })
+
+    return () => {
+      clearInterval(pollInterval)
+      supabase.removeChannel(channel)
+    }
   }, [load, id])
 
   // Draft countdown timer + auto-start
@@ -334,7 +402,6 @@ export default function LeaguePage() {
       const diff = new Date(league.scheduled_at) - new Date()
       if (diff <= 0) {
         setCountdown(null)
-        // Auto-start the draft!
         if (!draftStarted) {
           await supabase.from('leagues').update({
             draft_started: true,
@@ -343,6 +410,8 @@ export default function LeaguePage() {
           }).eq('id', id)
           setDraftStarted(true)
           didStartRef.current = true
+          // Switch everyone to the draft tab automatically
+          setTab('draft')
           try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 100) } catch(e) {}
         }
         return
@@ -614,15 +683,16 @@ export default function LeaguePage() {
   async function saveSchedule() {
     if (!scheduledTime) return
     const localDate = new Date(scheduledTime)
-    // Validate it's in the future
     if (localDate <= new Date()) {
-      alert('Invalid date/time — please enter a future time.')
+      alert('Please choose a future date and time.')
       return
     }
     setSavingSchedule(true)
-    await supabase.from('leagues').update({ scheduled_at: localDate.toISOString() }).eq('id', id)
+    const isoTime = localDate.toISOString()
+    await supabase.from('leagues').update({ scheduled_at: isoTime }).eq('id', id)
+    // Update local league state so countdown starts immediately without refresh
+    setLeague(prev => ({ ...prev, scheduled_at: isoTime }))
     setSavingSchedule(false)
-    alert('Draft time saved! ' + localDate.toLocaleString())
   }
 
   async function sendChat() {
