@@ -534,26 +534,24 @@ export default function LeaguePage() {
     pickingRef.current = true
 
     try {
-      // Use draftPosRef as primary check - updates synchronously
-      const currentPos = draftPosRef.current
-      const turn = getTurn(currentPos, league?.size || 4)
-      if (turn !== mySlot) return
-
-      // Verify with fresh DB state
+      // Fresh state from DB every time
       const { data: lg } = await supabase
         .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
       if (!lg?.draft_started) return
-      if (getTurn(lg.draft_pos, lg.size) !== mySlot) return
+
+      // Must be this player's turn
+      const turn = getTurn(lg.draft_pos, lg.size)
+      if (turn !== mySlot) return
 
       const tpp = 48 / lg.size
 
-      // Check team not taken
+      // Team must not be taken
       const { count: taken } = await supabase
         .from('picks').select('id', { count: 'exact', head: true })
         .eq('league_id', id).eq('team_name', teamName)
       if (taken > 0) return
 
-      // Check pick count
+      // Player must not exceed their allotment
       const { count: myCount } = await supabase
         .from('picks').select('id', { count: 'exact', head: true })
         .eq('league_id', id).eq('user_id', user.id)
@@ -565,17 +563,15 @@ export default function LeaguePage() {
       })
       if (error) return
 
-      // Advance pos synchronously NOW - before DB write
+      // Update local state immediately so UI responds
       const newPos = lg.draft_pos + 1
       draftPosRef.current = newPos
-
-      // Update local state
       setPicks(prev => ({ ...prev, [teamName]: user.id }))
       setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
-      playSound('pick')
       setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
+      playSound('pick')
 
-      // Write to DB - AWAIT this before releasing lock
+      // Advance in DB — triggers real-time for all players
       await supabase.from('leagues').update({
         draft_pos: newPos,
         pick_started_at: new Date().toISOString()
@@ -587,11 +583,9 @@ export default function LeaguePage() {
       }
 
     } finally {
-      // Lock is released ONLY after DB write completes above
       pickingRef.current = false
     }
   }
-
   // Push notification registration
   async function registerPushNotifications() {
     if (!('Notification' in window)) return false
