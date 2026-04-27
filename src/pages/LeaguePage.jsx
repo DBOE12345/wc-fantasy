@@ -482,47 +482,75 @@ export default function LeaguePage() {
         }
         if (prev <= 1) {
           clearInterval(timerRef.current)
-          // Time ran out — auto pick for whoever's turn it is (works even if they're not on draft tab)
+          // Time ran out — auto pick
           setTimeout(async () => {
             const { data: freshLeague } = await supabase
               .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
             if (!freshLeague?.draft_started) return
+
             const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
-            // Find the member whose turn it is
             const { data: members2 } = await supabase
               .from('league_members').select('user_id, draft_slot').eq('league_id', id)
             const turnMember = members2?.find(m => m.draft_slot === whoseTurn)
-            // Only the first player alphabetically triggers auto-pick to avoid duplicates
-            // Use the logged-in user only if it's their slot, OR if no one else will do it (slot 0 always fires as fallback)
-            if (whoseTurn !== mySlot && mySlot !== 0) return
-            if (whoseTurn !== mySlot && mySlot === 0) {
-              // I'm slot 0 acting as fallback — only fire if the real owner hasn't picked
-              const { data: recentPick } = await supabase
-                .from('picks').select('picked_at').eq('league_id', id)
-                .order('picked_at', { ascending: false }).limit(1).single()
-              const lastPickTime = recentPick?.picked_at ? new Date(recentPick.picked_at) : null
-              if (lastPickTime && (new Date() - lastPickTime) < 58000) return // someone picked recently
+
+            // Primary: if it's my turn, I pick for myself immediately
+            if (whoseTurn === mySlot) {
+              const { data: existingPicks } = await supabase
+                .from('picks').select('team_name').eq('league_id', id)
+              const takenNames = new Set(existingPicks?.map(p => p.team_name) || [])
+              const available = TEAMS.filter(t => !takenNames.has(t.n))
+              if (!available.length) return
+              const auto = available[Math.floor(Math.random() * available.length)]
+              const tpp = 48 / freshLeague.size
+              const { count: myCount } = await supabase
+                .from('picks').select('id', { count: 'exact', head: true })
+                .eq('league_id', id).eq('user_id', user.id)
+              if ((myCount || 0) >= tpp) return
+              const { error } = await supabase.from('picks').insert({
+                league_id: id, user_id: user.id, team_name: auto.n
+              })
+              if (!error) {
+                setLeague(prev => prev ? { ...prev, draft_pos: freshLeague.draft_pos + 1, pick_started_at: new Date().toISOString() } : prev)
+                await supabase.from('leagues').update({
+                  draft_pos: freshLeague.draft_pos + 1,
+                  pick_started_at: new Date().toISOString()
+                }).eq('id', id)
+              }
+              return
             }
-            const { data: existingPicks } = await supabase
-              .from('picks').select('team_name').eq('league_id', id)
-            const takenNames = new Set(existingPicks?.map(p => p.team_name) || [])
-            const available = TEAMS.filter(t => !takenNames.has(t.n))
-            if (!available.length) return
-            const auto = available[Math.floor(Math.random() * available.length)]
-            const tpp = 48 / freshLeague.size
-            const pickUserId = turnMember?.user_id || user.id
-            const { count: theirCount } = await supabase
-              .from('picks').select('id', { count: 'exact', head: true })
-              .eq('league_id', id).eq('user_id', pickUserId)
-            if ((theirCount || 0) >= tpp) return
-            const { error } = await supabase.from('picks').insert({
-              league_id: id, user_id: pickUserId, team_name: auto.n
-            })
-            if (!error) {
-              await supabase.from('leagues').update({
-                draft_pos: freshLeague.draft_pos + 1,
-                pick_started_at: new Date().toISOString()
-              }).eq('id', id)
+
+            // Fallback: if it's NOT my turn but the current player seems offline,
+            // wait 5 extra seconds then pick for them (prevents draft from getting stuck)
+            // Only slot 0 does this to avoid duplicate picks
+            if (mySlot === 0) {
+              await new Promise(r => setTimeout(r, 5000))
+              // Re-check — did someone already pick?
+              const { data: recheckLeague } = await supabase
+                .from('leagues').select('draft_pos').eq('id', id).single()
+              if (!recheckLeague || recheckLeague.draft_pos !== freshLeague.draft_pos) return // already advanced
+              // Pick for the absent player
+              const { data: existingPicks } = await supabase
+                .from('picks').select('team_name').eq('league_id', id)
+              const takenNames = new Set(existingPicks?.map(p => p.team_name) || [])
+              const available = TEAMS.filter(t => !takenNames.has(t.n))
+              if (!available.length) return
+              const auto = available[Math.floor(Math.random() * available.length)]
+              const tpp = 48 / freshLeague.size
+              const absentUserId = turnMember?.user_id
+              if (!absentUserId) return
+              const { count: theirCount } = await supabase
+                .from('picks').select('id', { count: 'exact', head: true })
+                .eq('league_id', id).eq('user_id', absentUserId)
+              if ((theirCount || 0) >= tpp) return
+              const { error } = await supabase.from('picks').insert({
+                league_id: id, user_id: absentUserId, team_name: auto.n
+              })
+              if (!error) {
+                await supabase.from('leagues').update({
+                  draft_pos: freshLeague.draft_pos + 1,
+                  pick_started_at: new Date().toISOString()
+                }).eq('id', id)
+              }
             }
           }, 100)
           return PICK_TIMER
