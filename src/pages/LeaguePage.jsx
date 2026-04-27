@@ -191,18 +191,27 @@ export default function LeaguePage() {
     setLeague(lg)
     if (lg.scheduled_at) setScheduledTime(lg.scheduled_at.slice(0, 16))
 
-    // Load members + profiles in ONE query
+    // Load members first
     const { data: mems } = await supabase
       .from('league_members')
-      .select('*, profiles(username, email, avatar_url, referral_count)')
+      .select('*')
       .eq('league_id', id)
       .order('draft_slot')
 
-    const memsWithProfiles = (mems || []).map(m => {
-      // Supabase join returns profiles as array or object depending on FK setup
-      const profileData = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles
-      return { ...m, profile: profileData || null }
-    })
+    // Load all profiles for these members in one query
+    const userIds = (mems || []).map(m => m.user_id)
+    const { data: profilesData } = userIds.length > 0
+      ? await supabase.from('profiles').select('id, username, email, avatar_url, referral_count').in('id', userIds)
+      : { data: [] }
+
+    // Map profiles to members
+    const profileMap = {}
+    ;(profilesData || []).forEach(p => { profileMap[p.id] = p })
+
+    const memsWithProfiles = (mems || []).map(m => ({
+      ...m,
+      profile: profileMap[m.user_id] || null
+    }))
     setMembers(memsWithProfiles)
 
     const me = memsWithProfiles.find(m => m.user_id === user.id)
@@ -524,33 +533,36 @@ export default function LeaguePage() {
     return () => clearInterval(timerRef.current)
   }, [league?.draft_pos, league?.pick_started_at, draftStarted, mySlot, league?.size])
 
-  async function makePick(teamName, isAuto = false) {
+  async function makePick(teamName) {
+    // Guards
     if (!draftStarted) return
-    if (mySlot === null) return // slot not loaded yet
+    if (mySlot === null) return
     if (pickingRef.current) return
     pickingRef.current = true
 
     try {
-      // Always fetch fresh state from DB
-      const { data: freshLeague } = await supabase
+      // Get fresh league state from DB every time
+      const { data: lg } = await supabase
         .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
-      if (!freshLeague || !freshLeague.draft_started) return
+      if (!lg?.draft_started) return
 
-      const tpp = 48 / freshLeague.size
-      const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
+      // Verify it's actually this player's turn
+      const turn = getTurn(lg.draft_pos, lg.size)
+      if (turn !== mySlot) return
 
-      // Only allow picking if it's this player's turn - use DB fresh state
-      if (whoseTurn !== mySlot) return
+      const tpp = 48 / lg.size
 
-      // Check team not already picked
-      const { count: existingCount } = await supabase
-        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('team_name', teamName)
-      if (existingCount && existingCount > 0) return
+      // Check team not already taken
+      const { count: taken } = await supabase
+        .from('picks').select('id', { count: 'exact', head: true })
+        .eq('league_id', id).eq('team_name', teamName)
+      if (taken > 0) return
 
-      // Check player hasn't exceeded their allotment for this draft
+      // Check this player hasn't exceeded their picks
       const { count: myCount } = await supabase
-        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('user_id', user.id)
-      if ((myCount || 0) >= tpp) return
+        .from('picks').select('id', { count: 'exact', head: true })
+        .eq('league_id', id).eq('user_id', user.id)
+      if (myCount >= tpp) return
 
       // Insert pick
       const { error } = await supabase.from('picks').insert({
@@ -558,16 +570,20 @@ export default function LeaguePage() {
       })
       if (error) return
 
+      // Update local state immediately so UI responds fast
+      setPicks(prev => ({ ...prev, [teamName]: user.id }))
+      setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
       playSound('pick')
 
-      // Advance draft_pos by exactly 1 AND reset timer
+      // Advance turn in DB - this triggers real-time UPDATE for all clients
+      const newPos = lg.draft_pos + 1
+      const isDone = newPos >= tpp * lg.size
       await supabase.from('leagues').update({
-        draft_pos: freshLeague.draft_pos + 1,
+        draft_pos: newPos,
         pick_started_at: new Date().toISOString()
       }).eq('id', id)
 
-      // Check if complete
-      if (freshLeague.draft_pos + 1 >= (tpp * freshLeague.size)) {
+      if (isDone) {
         setDraftComplete(true)
         playSound('complete')
       }
@@ -713,11 +729,9 @@ export default function LeaguePage() {
 
   function getDisplayName(m) {
     if (!m) return 'TBD'
-    const name = m.profile?.username
-      || m.profile?.email?.split('@')[0]
-      || m.profiles?.username
-      || m.profiles?.email?.split('@')[0]
-    if (name && name.trim().length > 0) return name.trim()
+    const p = m.profile
+    if (p?.username?.trim()) return p.username.trim()
+    if (p?.email) return p.email.split('@')[0]
     return `Player ${(m.draft_slot ?? 0) + 1}`
   }
 
