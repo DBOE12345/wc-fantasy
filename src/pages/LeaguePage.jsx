@@ -153,7 +153,7 @@ export default function LeaguePage() {
   const [league, setLeague] = useState(null)
   const [members, setMembers] = useState([])
   const [picks, setPicks] = useState({})
-  const [mySlot, setMySlot] = useState(0)
+  const [mySlot, setMySlot] = useState(null) // null = not loaded yet
   const [bracket, setBracket] = useState(null)
   const [fixtures, setFixtures] = useState([])
   const [tab, setTab] = useState('league')
@@ -325,7 +325,9 @@ export default function LeaguePage() {
         setPicksOrdered([])
         setBracket(null)
         setDraftStarted(false)
+        setDraftComplete(false)
         setTimeLeft(PICK_TIMER)
+        setScheduledTime('')
         load()
         return
       }
@@ -520,6 +522,7 @@ export default function LeaguePage() {
 
   async function makePick(teamName, isAuto = false) {
     if (!draftStarted) return
+    if (mySlot === null) return // slot not loaded yet
     if (pickingRef.current) return
     pickingRef.current = true
 
@@ -532,7 +535,7 @@ export default function LeaguePage() {
       const tpp = 48 / freshLeague.size
       const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
 
-      // Only allow picking if it's this player's turn
+      // Only allow picking if it's this player's turn - use DB fresh state
       if (whoseTurn !== mySlot) return
 
       // Check team not already picked
@@ -540,7 +543,7 @@ export default function LeaguePage() {
         .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('team_name', teamName)
       if (existingCount && existingCount > 0) return
 
-      // Check player hasn't exceeded their allotment
+      // Check player hasn't exceeded their allotment for this draft
       const { count: myCount } = await supabase
         .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('user_id', user.id)
       if ((myCount || 0) >= tpp) return
@@ -551,23 +554,21 @@ export default function LeaguePage() {
       })
       if (error) return
 
-      setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
       playSound('pick')
 
-      // Advance draft by 1 AND record when this new turn started (for timer sync)
-      const newPos = freshLeague.draft_pos + 1
+      // Advance draft_pos by exactly 1 AND reset timer
       await supabase.from('leagues').update({
-        draft_pos: newPos,
+        draft_pos: freshLeague.draft_pos + 1,
         pick_started_at: new Date().toISOString()
       }).eq('id', id)
 
       // Check if complete
-      const { count: totalCount } = await supabase
-        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id)
-      if ((totalCount || 0) >= 48) { setDraftComplete(true); playSound('complete') }
+      if (freshLeague.draft_pos + 1 >= (tpp * freshLeague.size)) {
+        setDraftComplete(true)
+        playSound('complete')
+      }
 
     } finally {
-      // ALWAYS release the lock no matter what
       pickingRef.current = false
     }
   }
@@ -1279,19 +1280,25 @@ export default function LeaguePage() {
                     className="btn btn-secondary"
                     style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090', borderColor: 'rgba(255,75,75,.3)' }}
                     onClick={async () => {
-                      if (!window.confirm('Restart the entire draft? ALL picks deleted, everyone starts over.')) return
-                      // Step 1: Clear local state immediately on commissioner's screen
+                      if (!window.confirm('Restart the entire draft? ALL picks will be deleted and the draft will go back to not started.')) return
+                      // Clear local state immediately
                       setPicks({})
                       setPicksOrdered([])
                       setBracket(null)
                       setDraftStarted(false)
+                      setDraftComplete(false)
                       setTimeLeft(PICK_TIMER)
-                      // Step 2: Delete all picks from DB
+                      setTab('league')
+                      // Delete all picks from DB
                       await supabase.from('picks').delete().eq('league_id', id)
-                      // Step 3: Reset league — UPDATE subscription fires for all other clients
-                      await supabase.from('leagues')
-                        .update({ draft_pos: 0, draft_started: false, bracket_data: null })
-                        .eq('id', id)
+                      // Reset league — draft_started false, pos 0, clear scheduled time too
+                      await supabase.from('leagues').update({
+                        draft_pos: 0,
+                        draft_started: false,
+                        bracket_data: null,
+                        pick_started_at: null,
+                        scheduled_at: null
+                      }).eq('id', id)
                     }}
                   >
                     🔄 Restart draft
