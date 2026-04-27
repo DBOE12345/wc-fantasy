@@ -294,40 +294,41 @@ export default function LeaguePage() {
     .on('postgres_changes', {
       event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}`
     }, (payload) => {
-      const updated = payload.new
-      if (!updated) return
+      // Fetch fresh from DB to guarantee complete data
+      supabase.from('leagues').select('*').eq('id', id).single()
+        .then(({ data: updated }) => {
+          if (!updated) return
 
-      setLeague(updated)
-      draftPosRef.current = updated.draft_pos || 0
+          setLeague(updated)
+          draftPosRef.current = updated.draft_pos || 0
 
-      const nowStarted = !!updated.draft_started
-      const wasReset = !updated.draft_started && updated.draft_pos === 0
+          const nowStarted = !!updated.draft_started
+          const wasReset = !updated.draft_started && updated.draft_pos === 0
 
-      if (wasReset) {
-        // Draft was restarted — clean single update, no double renders
-        setPicks({})
-        setPicksOrdered([])
-        setBracket(null)
-        setDraftStarted(false)
-        setDraftComplete(false)
-        setTimeLeft(PICK_TIMER)
-        setScheduledTime('')
-        setTab('league')
-        return
-      }
+          if (wasReset) {
+            setPicks({})
+            setPicksOrdered([])
+            setBracket(null)
+            setDraftStarted(false)
+            setDraftComplete(false)
+            setTimeLeft(PICK_TIMER)
+            setScheduledTime('')
+            setTab('league')
+            return
+          }
 
-      // Draft started or advanced
-      setDraftStarted(prev => {
-        if (!prev && nowStarted && !didStartRef.current) {
-          try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
-          setTimeout(() => setTab('draft'), 500)
-        }
-        return nowStarted
-      })
+          setDraftStarted(prev => {
+            if (!prev && nowStarted && !didStartRef.current) {
+              try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
+              setTimeout(() => setTab('draft'), 500)
+            }
+            return nowStarted
+          })
 
-      if (updated.bracket_data) {
-        try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
-      }
+          if (updated.bracket_data) {
+            try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+          }
+        })
     })
 
     // LEAGUE_MEMBERS - INSERT: new player joined
