@@ -198,10 +198,11 @@ export default function LeaguePage() {
       .eq('league_id', id)
       .order('draft_slot')
 
-    const memsWithProfiles = (mems || []).map(m => ({
-      ...m,
-      profile: m.profiles || null
-    }))
+    const memsWithProfiles = (mems || []).map(m => {
+      // Supabase join returns profiles as array or object depending on FK setup
+      const profileData = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles
+      return { ...m, profile: profileData || null }
+    })
     setMembers(memsWithProfiles)
 
     const me = memsWithProfiles.find(m => m.user_id === user.id)
@@ -307,20 +308,14 @@ export default function LeaguePage() {
     }, (payload) => {
       const updated = payload.new
       if (!updated) return
+
       setLeague(updated)
+
       const nowStarted = !!updated.draft_started
       const wasReset = !updated.draft_started && updated.draft_pos === 0
 
-      setDraftStarted(prev => {
-        if (!prev && nowStarted && !didStartRef.current) {
-          try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
-          // Switch all players to draft tab when draft starts
-          setTimeout(() => setTab('draft'), 500)
-        }
-        return nowStarted
-      })
-
       if (wasReset) {
+        // Draft was restarted — clean single update, no double renders
         setPicks({})
         setPicksOrdered([])
         setBracket(null)
@@ -328,9 +323,18 @@ export default function LeaguePage() {
         setDraftComplete(false)
         setTimeLeft(PICK_TIMER)
         setScheduledTime('')
-        load()
+        setTab('league')
         return
       }
+
+      // Draft started or advanced
+      setDraftStarted(prev => {
+        if (!prev && nowStarted && !didStartRef.current) {
+          try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
+          setTimeout(() => setTab('draft'), 500)
+        }
+        return nowStarted
+      })
 
       if (updated.bracket_data) {
         try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
@@ -709,9 +713,11 @@ export default function LeaguePage() {
 
   function getDisplayName(m) {
     if (!m) return 'TBD'
-    // Try username first, then email prefix, then generic player number
-    const name = m.profile?.username || m.profile?.email?.split('@')[0]
-    if (name && name.length > 2) return name
+    const name = m.profile?.username
+      || m.profile?.email?.split('@')[0]
+      || m.profiles?.username
+      || m.profiles?.email?.split('@')[0]
+    if (name && name.trim().length > 0) return name.trim()
     return `Player ${(m.draft_slot ?? 0) + 1}`
   }
 
@@ -1268,9 +1274,12 @@ export default function LeaguePage() {
                         return next
                       })
                       setPicksOrdered(prev => prev.filter(p => p.id !== lastPick.id && p.team_name !== lastPick.team_name))
-                      // Step 3: go back 1 draft position
+                      // Step 3: go back 1 draft position and reset timer
                       const newPos = Math.max(0, (league?.draft_pos || 1) - 1)
-                      await supabase.from('leagues').update({ draft_pos: newPos }).eq('id', id)
+                      await supabase.from('leagues').update({
+                        draft_pos: newPos,
+                        pick_started_at: new Date().toISOString()
+                      }).eq('id', id)
                       // Real-time will sync other clients via DELETE subscription
                     }}
                   >
@@ -1281,17 +1290,7 @@ export default function LeaguePage() {
                     style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090', borderColor: 'rgba(255,75,75,.3)' }}
                     onClick={async () => {
                       if (!window.confirm('Restart the entire draft? ALL picks will be deleted and the draft will go back to not started.')) return
-                      // Clear local state immediately
-                      setPicks({})
-                      setPicksOrdered([])
-                      setBracket(null)
-                      setDraftStarted(false)
-                      setDraftComplete(false)
-                      setTimeLeft(PICK_TIMER)
-                      setTab('league')
-                      // Delete all picks from DB
-                      await supabase.from('picks').delete().eq('league_id', id)
-                      // Reset league — draft_started false, pos 0, clear scheduled time too
+                      // Step 1: Reset league in DB first — real-time fires for all clients
                       await supabase.from('leagues').update({
                         draft_pos: 0,
                         draft_started: false,
@@ -1299,6 +1298,10 @@ export default function LeaguePage() {
                         pick_started_at: null,
                         scheduled_at: null
                       }).eq('id', id)
+                      // Step 2: Delete all picks — real-time DELETE fires for all clients
+                      await supabase.from('picks').delete().eq('league_id', id)
+                      // Step 3: load() is called by the real-time handler — no local state changes here
+                      // This prevents the flash caused by multiple rapid state updates
                     }}
                   >
                     🔄 Restart draft
