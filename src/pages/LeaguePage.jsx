@@ -311,7 +311,6 @@ export default function LeaguePage() {
         setPicks(prev => { const n = { ...prev }; delete n[deleted.team_name]; return n })
         setPicksOrdered(prev => prev.filter(p => p.team_name !== deleted.team_name))
       }
-      load()
     })
 
     // LEAGUE - UPDATE
@@ -354,19 +353,42 @@ export default function LeaguePage() {
       }
     })
 
-    // LEAGUE_MEMBERS - INSERT: new player joined the league
+    // LEAGUE_MEMBERS - INSERT: new player joined
     .on('postgres_changes', {
       event: 'INSERT', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}`
     }, () => {
-      // Someone new joined — reload members list so leaderboard updates
-      load()
+      // Reload members only - don't call full load() which can reset draft_pos
+      supabase
+        .from('league_members').select('*').eq('league_id', id).order('draft_slot')
+        .then(async ({ data: mems }) => {
+          if (!mems) return
+          const userIds = mems.map(m => m.user_id)
+          const { data: profilesData } = await supabase
+            .from('profiles').select('id, username, email, avatar_url, referral_count').in('id', userIds)
+          const profileMap = {}
+          ;(profilesData || []).forEach(p => { profileMap[p.id] = p })
+          const memsWithProfiles = mems.map(m => ({ ...m, profile: profileMap[m.user_id] || null }))
+          setMembers(memsWithProfiles)
+        })
     })
 
     // LEAGUE_MEMBERS - UPDATE: draft order changed
     .on('postgres_changes', {
       event: 'UPDATE', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}`
     }, () => {
-      load()
+      // Reload members only - don't call full load() which can reset draft_pos
+      supabase
+        .from('league_members').select('*').eq('league_id', id).order('draft_slot')
+        .then(async ({ data: mems }) => {
+          if (!mems) return
+          const userIds = mems.map(m => m.user_id)
+          const { data: profilesData } = await supabase
+            .from('profiles').select('id, username, email, avatar_url, referral_count').in('id', userIds)
+          const profileMap = {}
+          ;(profilesData || []).forEach(p => { profileMap[p.id] = p })
+          const memsWithProfiles = mems.map(m => ({ ...m, profile: profileMap[m.user_id] || null }))
+          setMembers(memsWithProfiles)
+        })
     })
 
     // CHAT - INSERT
