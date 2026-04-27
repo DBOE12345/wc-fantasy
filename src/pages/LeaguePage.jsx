@@ -575,9 +575,12 @@ export default function LeaguePage() {
       setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
       playSound('pick')
 
-      // Advance turn in DB - this triggers real-time UPDATE for all clients
+      // Advance turn in DB - also update local league state immediately
+      // so isMyTurn becomes false right away and player cant pick again
       const newPos = lg.draft_pos + 1
       const isDone = newPos >= tpp * lg.size
+      setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
+
       await supabase.from('leagues').update({
         draft_pos: newPos,
         pick_started_at: new Date().toISOString()
