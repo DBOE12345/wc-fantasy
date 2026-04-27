@@ -24,7 +24,22 @@ export default function HomePage() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [profile, setProfile] = useState(null)
 
-  useEffect(() => { loadMyLeagues(); loadProfile() }, [user])
+  useEffect(() => {
+    loadMyLeagues()
+    loadProfile()
+
+    // Subscribe to league_members changes so home page updates when someone joins a league
+    const channel = supabase.channel('home_members')
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'league_members'
+      }, () => { loadMyLeagues() })
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'leagues'
+      }, () => { loadMyLeagues() })
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [user])
 
   async function loadProfile() {
     const { data } = await supabase.from('profiles').select('username, avatar_url').eq('id', user.id).single()

@@ -182,82 +182,72 @@ export default function LeaguePage() {
   const timerRef = useRef(null)
   const pickingRef = useRef(false) // prevents double picks
 
+  const navigateRef = useRef(navigate)
+  useEffect(() => { navigateRef.current = navigate }, [navigate])
+
   const load = useCallback(async () => {
     const { data: lg } = await supabase.from('leagues').select('*').eq('id', id).single()
-    if (!lg) { navigate('/'); return }
+    if (!lg) { navigateRef.current('/'); return }
     setLeague(lg)
     if (lg.scheduled_at) setScheduledTime(lg.scheduled_at.slice(0, 16))
-    // draft_started will be set after we load picks below
 
-    // Fetch members without profiles join first (more reliable)
-    const { data: mems, error: memsError } = await supabase
+    // Load members + profiles in ONE query
+    const { data: mems } = await supabase
       .from('league_members')
-      .select('*')
+      .select('*, profiles(username, email, avatar_url, referral_count)')
       .eq('league_id', id)
       .order('draft_slot')
-    
-    if (memsError) console.error('Members error:', memsError)
-    
-    // Try to get profiles separately
-    const memsWithProfiles = await Promise.all((mems || []).map(async m => {
-      const { data: profile } = await supabase
-        .from('profiles').select('username, email, avatar_url, referral_count').eq('id', m.user_id).single()
-      return { ...m, profile: profile || null }
-    }))
-    
-    setMembers(memsWithProfiles)
-    const me = memsWithProfiles.find(m => m.user_id === user.id)
-    const myDraftSlot = me?.draft_slot ?? null
-    if (myDraftSlot !== null) setMySlot(myDraftSlot)
-    console.log('My slot:', myDraftSlot, 'All members:', memsWithProfiles.map(m => ({ slot: m.draft_slot, uid: m.user_id.slice(0,8) })))
 
+    const memsWithProfiles = (mems || []).map(m => ({
+      ...m,
+      profile: m.profiles || null
+    }))
+    setMembers(memsWithProfiles)
+
+    const me = memsWithProfiles.find(m => m.user_id === user.id)
+    if (me?.draft_slot != null) setMySlot(me.draft_slot)
+
+    // Load picks
     const { data: pickData } = await supabase
-      .from('picks').select('team_name, user_id, picked_at').eq('league_id', id).order('picked_at')
+      .from('picks').select('*').eq('league_id', id).order('picked_at')
     const pickMap = {}
     pickData?.forEach(p => { pickMap[p.team_name] = p.user_id })
     setPicks(pickMap)
     setPicksOrdered(pickData || [])
 
-    // Only treat draft as started if DB says so AND there are actual picks OR draft_pos > 0
+    // Set draft started state
     const actuallyStarted = !!lg.draft_started && (lg.draft_pos > 0 || (pickData?.length || 0) > 0)
     setDraftStarted(actuallyStarted)
-    // If DB says started but no picks exist, clean up the stale state
     if (!!lg.draft_started && !actuallyStarted) {
       await supabase.from('leagues').update({ draft_started: false, draft_pos: 0 }).eq('id', lg.id)
     }
 
-    if (lg.bracket_data) setBracket(JSON.parse(lg.bracket_data))
-    else if (Object.keys(pickMap).length >= 48) {
+    // Bracket
+    if (lg.bracket_data) {
+      try { setBracket(JSON.parse(lg.bracket_data)) } catch(e) {}
+    } else if (pickData?.length >= 48) {
       const b = simulateBracket()
       setBracket(b)
       await supabase.from('leagues').update({ bracket_data: JSON.stringify(b) }).eq('id', id)
     }
-    // Load chat messages
+
+    // Chat
     const { data: msgs } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('league_id', id)
-      .order('created_at')
-      .limit(50)
+      .from('chat_messages').select('*').eq('league_id', id).order('created_at').limit(50)
     setChatMessages(msgs || [])
 
-    // Load my profile for avatar
-    const { data: profileData } = await supabase.from('profiles').select('username, avatar_url, referral_count').eq('id', user.id).single()
+    // My profile
+    const { data: profileData } = await supabase
+      .from('profiles').select('username, avatar_url, referral_count').eq('id', user.id).single()
     if (profileData) setMyProfile(profileData)
 
-    // Load real match fixtures (goes live June 11 2026)
-    const wcStart = new Date('2026-06-11T00:00:00Z')
-    if (new Date() >= wcStart) {
-      try {
-        const fixtureData = await fetchFixtures()
-        setFixtures(fixtureData)
-      } catch(e) {
-        console.error('Could not load fixtures:', e)
-      }
+    // Fixtures after WC starts
+    if (new Date() >= new Date('2026-06-11T00:00:00Z')) {
+      try { const f = await fetchFixtures(); setFixtures(f) } catch(e) {}
     }
 
     setLoading(false)
-  }, [id, user.id, navigate])
+  }, [id, user.id])
 
   useEffect(() => {
     load()
@@ -279,7 +269,7 @@ export default function LeaguePage() {
             return prev
           })
         })
-    }, 8000)
+    }, 5000)
 
     const channel = supabase.channel(`league_${id}`, {
       config: { broadcast: { self: true } }
