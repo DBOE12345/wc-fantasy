@@ -184,6 +184,7 @@ export default function LeaguePage() {
 
   const mySlotRef = useRef(null)
   useEffect(() => { mySlotRef.current = mySlot }, [mySlot])
+  const draftPosRef = useRef(0) // tracks draft_pos synchronously
   const navigateRef = useRef(navigate)
   useEffect(() => { navigateRef.current = navigate }, [navigate])
 
@@ -191,6 +192,7 @@ export default function LeaguePage() {
     const { data: lg } = await supabase.from('leagues').select('*').eq('id', id).single()
     if (!lg) { navigateRef.current('/'); return }
     setLeague(lg)
+    draftPosRef.current = lg.draft_pos || 0
     if (lg.scheduled_at) setScheduledTime(lg.scheduled_at.slice(0, 16))
 
     // Load members first
@@ -218,7 +220,6 @@ export default function LeaguePage() {
 
     const me = memsWithProfiles.find(m => m.user_id === user.id)
     if (me?.draft_slot != null) setMySlot(me.draft_slot)
-
     // Load picks
     const { data: pickData } = await supabase
       .from('picks').select('*').eq('league_id', id).order('picked_at')
@@ -321,6 +322,7 @@ export default function LeaguePage() {
       if (!updated) return
 
       setLeague(updated)
+      draftPosRef.current = updated.draft_pos || 0
 
       const nowStarted = !!updated.draft_started
       const wasReset = !updated.draft_started && updated.draft_pos === 0
@@ -564,31 +566,32 @@ export default function LeaguePage() {
   }, [league?.draft_pos, league?.pick_started_at, draftStarted, mySlot, league?.size])
 
   async function makePick(teamName) {
-    // Hard block - if already picking, stop immediately
     if (!draftStarted) return
     if (mySlot === null) return
     if (pickingRef.current) return
-    pickingRef.current = true  // LOCK immediately, before any async
+    pickingRef.current = true
 
     try {
-      // Get fresh state from DB
+      // Use draftPosRef as primary check - updates synchronously
+      const currentPos = draftPosRef.current
+      const turn = getTurn(currentPos, league?.size || 4)
+      if (turn !== mySlot) return
+
+      // Verify with fresh DB state
       const { data: lg } = await supabase
         .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
       if (!lg?.draft_started) return
-
-      // Check it's actually this player's turn
-      const turn = getTurn(lg.draft_pos, lg.size)
-      if (turn !== mySlot) return
+      if (getTurn(lg.draft_pos, lg.size) !== mySlot) return
 
       const tpp = 48 / lg.size
 
-      // Check team not already taken
+      // Check team not taken
       const { count: taken } = await supabase
         .from('picks').select('id', { count: 'exact', head: true })
         .eq('league_id', id).eq('team_name', teamName)
       if (taken > 0) return
 
-      // Check player pick count against tpp
+      // Check pick count
       const { count: myCount } = await supabase
         .from('picks').select('id', { count: 'exact', head: true })
         .eq('league_id', id).eq('user_id', user.id)
@@ -600,19 +603,17 @@ export default function LeaguePage() {
       })
       if (error) return
 
-      // Update local picks state
+      // Advance pos synchronously NOW - before DB write
+      const newPos = lg.draft_pos + 1
+      draftPosRef.current = newPos
+
+      // Update local state
       setPicks(prev => ({ ...prev, [teamName]: user.id }))
       setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
       playSound('pick')
+      setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
 
-      // Advance draft_pos — update local league state immediately so isMyTurn = false RIGHT NOW
-      const newPos = lg.draft_pos + 1
-      setLeague(prev => {
-        if (!prev) return prev
-        return { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() }
-      })
-
-      // Write to DB — triggers real-time for all other players
+      // Write to DB - AWAIT this before releasing lock
       await supabase.from('leagues').update({
         draft_pos: newPos,
         pick_started_at: new Date().toISOString()
@@ -624,7 +625,7 @@ export default function LeaguePage() {
       }
 
     } finally {
-      // Only release lock AFTER DB is updated — prevents any pick until turn is confirmed advanced
+      // Lock is released ONLY after DB write completes above
       pickingRef.current = false
     }
   }
@@ -1432,7 +1433,7 @@ export default function LeaguePage() {
                     const isTakenByOther = owner !== undefined && !isMine && !isBot
                     const isAnyonePicked = owner !== undefined
                     const ownerMember = isTakenByOther ? members.find(m => m.user_id === owner) : null
-                    const canPick = draftStarted && isMyTurn && !draftDone && !isAnyonePicked
+                    const canPick = draftStarted && isMyTurn && !draftDone && !isAnyonePicked && getTurn(draftPosRef.current, league?.size || 4) === mySlot
                     return (
                       <div key={t.n} className={`team-card ${isMine ? 'mine' : ''} ${isAnyonePicked && !isMine ? 'taken' : ''}`} onClick={() => canPick && makePick(t.n)} style={{ cursor: canPick ? 'pointer' : isAnyonePicked ? 'not-allowed' : 'default' }}>
                         {isMine && <div className="pick-check">✓</div>}
