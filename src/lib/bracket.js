@@ -71,20 +71,23 @@ export function simulateBracket() {
   const ruTeam = rdfin.losers[0]
 
   // stageBonus = CUMULATIVE additional points per round advanced
-  // R32: +5, R16: +8 more, QF: +12 more, SF: +20 more, Final: +30 more, Champion: +40 more
+  // Everyone who participates in a round gets that round's points
   const stageBonus = {}
   const add = (t, pts) => { stageBonus[t.n] = (stageBonus[t.n] || 0) + pts }
 
-  r32teams.forEach(t => add(t, SCORING.r32))          // +5 for making R32
-  rd16.winners.forEach(t => add(t, SCORING.r16))      // +8 for making R16
-  rdqf.winners.forEach(t => add(t, SCORING.qf))       // +12 for making QF
-  rdsf.winners.forEach(t => add(t, SCORING.sf))       // +20 for making SF
-  if (ruTeam) add(ruTeam, SCORING.ru)                  // +30 for making Final
-  if (champ) add(champ, SCORING.ch)                    // +40 for winning it all
-
-  // Champion total: 5+8+12+20+30+40 = 115 pts
-  // Runner-up total: 5+8+12+20+30 = 75 pts
-  // Semi-finalist total: 5+8+12+20 = 45 pts
+  // Give points to ALL participants at each round (both winners and losers)
+  // because reaching a round earns points regardless of whether you win it
+  r32teams.forEach(t => add(t, SCORING.r32))
+  // R16 participants = R32 winners
+  rd32.winners.forEach(t => add(t, SCORING.r16))
+  // QF participants = R16 winners
+  rd16.winners.forEach(t => add(t, SCORING.qf))
+  // SF participants = QF winners (both who win and lose the SF)
+  rdqf.winners.forEach(t => add(t, SCORING.sf))
+  // Final participants = SF winners (both who win and lose the Final)
+  rdsf.winners.forEach(t => add(t, SCORING.ru))
+  // Champion gets extra ch points on top of ru
+  if (champ) add(champ, SCORING.ch)
 
   return {
     r32: rd32.matches,
