@@ -153,7 +153,7 @@ export default function LeaguePage() {
   const [league, setLeague] = useState(null)
   const [members, setMembers] = useState([])
   const [picks, setPicks] = useState({})
-  const [mySlot, setMySlot] = useState(0)
+  const [mySlot, setMySlot] = useState(null) // null = not loaded yet
   const [bracket, setBracket] = useState(null)
   const [fixtures, setFixtures] = useState([])
   const [tab, setTab] = useState('league')
@@ -182,149 +182,223 @@ export default function LeaguePage() {
   const timerRef = useRef(null)
   const pickingRef = useRef(false) // prevents double picks
 
+  const mySlotRef = useRef(null)
+  useEffect(() => { mySlotRef.current = mySlot }, [mySlot])
+  const draftPosRef = useRef(0) // tracks draft_pos synchronously
+  const navigateRef = useRef(navigate)
+  useEffect(() => { navigateRef.current = navigate }, [navigate])
+
   const load = useCallback(async () => {
     const { data: lg } = await supabase.from('leagues').select('*').eq('id', id).single()
-    if (!lg) { navigate('/'); return }
+    if (!lg) { navigateRef.current('/'); return }
     setLeague(lg)
+    draftPosRef.current = lg.draft_pos || 0
     if (lg.scheduled_at) setScheduledTime(lg.scheduled_at.slice(0, 16))
-    // draft_started will be set after we load picks below
 
-    // Fetch members without profiles join first (more reliable)
-    const { data: mems, error: memsError } = await supabase
+    // Load members first
+    const { data: mems } = await supabase
       .from('league_members')
       .select('*')
       .eq('league_id', id)
       .order('draft_slot')
-    
-    if (memsError) console.error('Members error:', memsError)
-    
-    // Try to get profiles separately
-    const memsWithProfiles = await Promise.all((mems || []).map(async m => {
-      const { data: profile } = await supabase
-        .from('profiles').select('username, email, avatar_url, referral_count').eq('id', m.user_id).single()
-      return { ...m, profiles: profile || null }
-    }))
-    
-    setMembers(memsWithProfiles)
-    const me = memsWithProfiles.find(m => m.user_id === user.id)
-    const myDraftSlot = me?.draft_slot ?? null
-    if (myDraftSlot !== null) setMySlot(myDraftSlot)
-    console.log('My slot:', myDraftSlot, 'All members:', memsWithProfiles.map(m => ({ slot: m.draft_slot, uid: m.user_id.slice(0,8) })))
 
+    // Load all profiles for these members in one query
+    const userIds = (mems || []).map(m => m.user_id)
+    const { data: profilesData } = userIds.length > 0
+      ? await supabase.from('profiles').select('id, username, email, avatar_url, referral_count').in('id', userIds)
+      : { data: [] }
+
+    // Map profiles to members
+    const profileMap = {}
+    ;(profilesData || []).forEach(p => { profileMap[p.id] = p })
+
+    const memsWithProfiles = (mems || []).map(m => ({
+      ...m,
+      profile: profileMap[m.user_id] || null
+    }))
+    setMembers(memsWithProfiles)
+
+    const me = memsWithProfiles.find(m => m.user_id === user.id)
+    if (me?.draft_slot != null) setMySlot(me.draft_slot)
+    // Load picks
     const { data: pickData } = await supabase
-      .from('picks').select('team_name, user_id, picked_at').eq('league_id', id).order('picked_at')
+      .from('picks').select('*').eq('league_id', id).order('picked_at')
     const pickMap = {}
     pickData?.forEach(p => { pickMap[p.team_name] = p.user_id })
     setPicks(pickMap)
     setPicksOrdered(pickData || [])
 
-    // Only treat draft as started if DB says so AND there are actual picks OR draft_pos > 0
-    const actuallyStarted = !!lg.draft_started && (lg.draft_pos > 0 || (pickData?.length || 0) > 0)
-    setDraftStarted(actuallyStarted)
-    // If DB says started but no picks exist, clean up the stale state
-    if (!!lg.draft_started && !actuallyStarted) {
-      await supabase.from('leagues').update({ draft_started: false, draft_pos: 0 }).eq('id', lg.id)
-    }
+    // Set draft started state - trust the DB value
+    setDraftStarted(!!lg.draft_started)
 
-    if (lg.bracket_data) setBracket(JSON.parse(lg.bracket_data))
-    else if (Object.keys(pickMap).length >= 48) {
+    // Bracket
+    if (lg.bracket_data) {
+      try { setBracket(JSON.parse(lg.bracket_data)) } catch(e) {}
+    } else if (pickData?.length >= 48) {
       const b = simulateBracket()
       setBracket(b)
       await supabase.from('leagues').update({ bracket_data: JSON.stringify(b) }).eq('id', id)
     }
-    // Load chat messages
+
+    // Chat
     const { data: msgs } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('league_id', id)
-      .order('created_at')
-      .limit(50)
+      .from('chat_messages').select('*').eq('league_id', id).order('created_at').limit(50)
     setChatMessages(msgs || [])
 
-    // Load my profile for avatar
-    const { data: profileData } = await supabase.from('profiles').select('username, avatar_url, referral_count').eq('id', user.id).single()
+    // My profile
+    const { data: profileData } = await supabase
+      .from('profiles').select('username, avatar_url, referral_count').eq('id', user.id).single()
     if (profileData) setMyProfile(profileData)
 
-    // Load real match fixtures (goes live June 11 2026)
-    const wcStart = new Date('2026-06-11T00:00:00Z')
-    if (new Date() >= wcStart) {
-      try {
-        const fixtureData = await fetchFixtures()
-        setFixtures(fixtureData)
-      } catch(e) {
-        console.error('Could not load fixtures:', e)
-      }
+    // Fixtures after WC starts
+    if (new Date() >= new Date('2026-06-11T00:00:00Z')) {
+      try { const f = await fetchFixtures(); setFixtures(f) } catch(e) {}
     }
 
     setLoading(false)
-  }, [id, user.id, navigate])
+  }, [id, user.id])
 
   useEffect(() => {
     load()
-    const channel = supabase.channel(`league_${id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, (payload) => {
-        const newPick = payload.new
-        if (newPick) {
-          setPicks(prev => ({ ...prev, [newPick.team_name]: newPick.user_id }))
-          setPicksOrdered(prev => [...prev, newPick])
-          setTimeLeft(PICK_TIMER)
+
+    const channel = supabase.channel(`league_${id}`, {
+      config: { broadcast: { self: true } }
+    })
+
+    // PICKS - INSERT: new pick made by anyone
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'picks', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      const newPick = payload.new
+      if (!newPick) return
+      setPicks(prev => ({ ...prev, [newPick.team_name]: newPick.user_id }))
+      setPicksOrdered(prev => {
+        if (prev.some(p => p.team_name === newPick.team_name)) return prev
+        return [...prev, newPick]
+      })
+      playSound('pick')
+    })
+
+    // PICKS - DELETE: pick reversed
+    .on('postgres_changes', {
+      event: 'DELETE', schema: 'public', table: 'picks', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      const deleted = payload.old
+      if (deleted?.team_name) {
+        setPicks(prev => { const n = { ...prev }; delete n[deleted.team_name]; return n })
+        setPicksOrdered(prev => prev.filter(p => p.team_name !== deleted.team_name))
+      }
+    })
+
+    // LEAGUE - UPDATE
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}`
+    }, (payload) => {
+      // Use payload.new directly - it contains the committed values
+      const updated = payload.new
+      if (!updated || !updated.id) return
+
+      setLeague(prev => ({ ...prev, ...updated }))
+      draftPosRef.current = updated.draft_pos || 0
+
+      const nowStarted = !!updated.draft_started
+      const wasReset = !updated.draft_started && updated.draft_pos === 0
+
+      if (wasReset) {
+        setPicks({})
+        setPicksOrdered([])
+        setBracket(null)
+        setDraftStarted(false)
+        setDraftComplete(false)
+        setTimeLeft(PICK_TIMER)
+        setScheduledTime('')
+        setTab('league')
+        return
+      }
+
+      setDraftStarted(prev => {
+        if (!prev && nowStarted && !didStartRef.current) {
+          try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
+          setTimeout(() => setTab('draft'), 500)
         }
+        return nowStarted
       })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, (payload) => {
-        // Pick was reversed — remove from local state AND reload to ensure full sync on all devices
-        const deleted = payload.old
-        if (deleted?.team_name) {
-          setPicks(prev => {
-            const next = { ...prev }
-            delete next[deleted.team_name]
-            return next
-          })
-          setPicksOrdered(prev => prev.filter(p => p.team_name !== deleted.team_name))
-        }
-        // Full reload ensures phone and all other clients are in sync
-        load()
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}` }, (payload) => {
-        const updated = payload.new
-        if (updated) {
-          setLeague(updated)
-          const nowStarted = !!updated.draft_started
-          setDraftStarted(prev => {
-            if (!prev && nowStarted && !didStartRef.current) {
-              try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
-            }
-            // Draft was restarted — clear all local state
-            if (prev && !nowStarted && updated.draft_pos === 0) {
-              setPicks({})
-              setPicksOrdered([])
-              setBracket(null)
-              setTimeLeft(PICK_TIMER)
-            }
-            return nowStarted
-          })
-          if (updated.bracket_data) {
-            try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
-          } else if (!updated.draft_started && updated.draft_pos === 0) {
-            // Draft was reset
-            setBracket(null)
-          }
-        }
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}` }, () => {
-        // Draft order changed — reload all members to sync draft slots for everyone
-        load()
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}` }, (payload) => {
-        if (payload.new) setChatMessages(prev => [...prev, payload.new])
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}` }, () => {
-        // Chat cleared — reload messages
-        supabase.from('chat_messages').select('*').eq('league_id', id).order('created_at').then(({ data }) => {
-          setChatMessages(data || [])
+
+      if (updated.bracket_data) {
+        try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+      }
+    })
+
+    // LEAGUE_MEMBERS - INSERT: new player joined
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}`
+    }, () => {
+      // Reload members only - don't call full load() which can reset draft_pos
+      supabase
+        .from('league_members').select('*').eq('league_id', id).order('draft_slot')
+        .then(async ({ data: mems }) => {
+          if (!mems) return
+          const userIds = mems.map(m => m.user_id)
+          const { data: profilesData } = await supabase
+            .from('profiles').select('id, username, email, avatar_url, referral_count').in('id', userIds)
+          const profileMap = {}
+          ;(profilesData || []).forEach(p => { profileMap[p.id] = p })
+          const memsWithProfiles = mems.map(m => ({ ...m, profile: profileMap[m.user_id] || null }))
+          setMembers(memsWithProfiles)
         })
+    })
+
+    // LEAGUE_MEMBERS - UPDATE: draft order changed
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}`
+    }, () => {
+      // Reload members only - don't call full load() which can reset draft_pos
+      supabase
+        .from('league_members').select('*').eq('league_id', id).order('draft_slot')
+        .then(async ({ data: mems }) => {
+          if (!mems) return
+          const userIds = mems.map(m => m.user_id)
+          const { data: profilesData } = await supabase
+            .from('profiles').select('id, username, email, avatar_url, referral_count').in('id', userIds)
+          const profileMap = {}
+          ;(profilesData || []).forEach(p => { profileMap[p.id] = p })
+          const memsWithProfiles = mems.map(m => ({ ...m, profile: profileMap[m.user_id] || null }))
+          setMembers(memsWithProfiles)
+        })
+    })
+
+    // CHAT - INSERT
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      if (payload.new) setChatMessages(prev => {
+        if (prev.some(m => m.id === payload.new.id)) return prev
+        return [...prev, payload.new]
       })
-      .subscribe()
-    return () => supabase.removeChannel(channel)
+    })
+
+    // CHAT - DELETE
+    .on('postgres_changes', {
+      event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      if (payload.old?.id) {
+        setChatMessages(prev => prev.filter(m => m.id !== payload.old.id))
+      } else {
+        setChatMessages([])
+      }
+    })
+
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('✅ Realtime connected')
+      } else {
+        console.log('Realtime status:', status)
+      }
+    })
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [load, id])
 
   // Draft countdown timer + auto-start
@@ -334,11 +408,16 @@ export default function LeaguePage() {
       const diff = new Date(league.scheduled_at) - new Date()
       if (diff <= 0) {
         setCountdown(null)
-        // Auto-start the draft!
         if (!draftStarted) {
-          await supabase.from('leagues').update({ draft_started: true, bracket_data: null }).eq('id', id)
+          await supabase.from('leagues').update({
+            draft_started: true,
+            bracket_data: null,
+            pick_started_at: new Date().toISOString()
+          }).eq('id', id)
           setDraftStarted(true)
           didStartRef.current = true
+          // Switch everyone to the draft tab automatically
+          setTab('draft')
           try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 100) } catch(e) {}
         }
         return
@@ -358,20 +437,29 @@ export default function LeaguePage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
 
-  // Timer - runs for everyone when draft is active, auto-picks when MY turn expires
+  // Timer - synced to server timestamp so all clients show same countdown
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current)
-    const draftPos = league?.draft_pos || 0
+    const draftPos = Math.max(league?.draft_pos || 0, picksOrdered.length)
     const leagueSize = league?.size || 4
     const whoseTurn = getTurn(draftPos, leagueSize)
     const draftDoneNow = draftPos >= (48 / leagueSize) * leagueSize || Object.keys(picks).length >= 48
     const isMyTurnNow = draftStarted && !draftDoneNow && whoseTurn === mySlot
-    // Always reset timer when turn changes
-    setTimeLeft(PICK_TIMER)
-    // Run clock for everyone when draft is active so all players see it ticking
-    if (!draftStarted || draftDoneNow) return
+
+    if (!draftStarted || draftDoneNow) {
+      setTimeLeft(PICK_TIMER)
+      return
+    }
+
+    // Calculate initial time from server timestamp if available
+    const pickStarted = league?.pick_started_at ? new Date(league.pick_started_at) : null
+    const elapsed = pickStarted ? Math.floor((Date.now() - pickStarted.getTime()) / 1000) : 0
+    const initialTime = Math.max(1, PICK_TIMER - elapsed)
+    setTimeLeft(initialTime)
+
     // Send notification when it becomes my turn
     if (isMyTurnNow) sendPickNotification()
+
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev === 10) {
@@ -395,27 +483,21 @@ export default function LeaguePage() {
         }
         if (prev <= 1) {
           clearInterval(timerRef.current)
-          // Time ran out — auto pick for whoever's turn it is (works even if they're not on draft tab)
+          // Timer expired — only pick for MYSELF if it's my turn
           setTimeout(async () => {
             const { data: freshLeague } = await supabase
               .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
             if (!freshLeague?.draft_started) return
-            const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
-            // Find the member whose turn it is
-            const { data: members2 } = await supabase
-              .from('league_members').select('user_id, draft_slot').eq('league_id', id)
-            const turnMember = members2?.find(m => m.draft_slot === whoseTurn)
-            // Only the first player alphabetically triggers auto-pick to avoid duplicates
-            // Use the logged-in user only if it's their slot, OR if no one else will do it (slot 0 always fires as fallback)
-            if (whoseTurn !== mySlot && mySlot !== 0) return
-            if (whoseTurn !== mySlot && mySlot === 0) {
-              // I'm slot 0 acting as fallback — only fire if the real owner hasn't picked
-              const { data: recentPick } = await supabase
-                .from('picks').select('picked_at').eq('league_id', id)
-                .order('picked_at', { ascending: false }).limit(1).single()
-              const lastPickTime = recentPick?.picked_at ? new Date(recentPick.picked_at) : null
-              if (lastPickTime && (new Date() - lastPickTime) < 58000) return // someone picked recently
-            }
+
+            // Use actual pick count as source of truth - same as display logic
+            const { count: totalPicks } = await supabase
+              .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id)
+            const effectivePos = Math.max(freshLeague.draft_pos, totalPicks || 0)
+
+            // Only fire if it is actually MY turn right now
+            if (getTurn(effectivePos, freshLeague.size) !== mySlot) return
+
+            // Pick random available team for myself
             const { data: existingPicks } = await supabase
               .from('picks').select('team_name').eq('league_id', id)
             const takenNames = new Set(existingPicks?.map(p => p.team_name) || [])
@@ -423,17 +505,25 @@ export default function LeaguePage() {
             if (!available.length) return
             const auto = available[Math.floor(Math.random() * available.length)]
             const tpp = 48 / freshLeague.size
-            const pickUserId = turnMember?.user_id || user.id
-            const { count: theirCount } = await supabase
+            const { count: myCount } = await supabase
               .from('picks').select('id', { count: 'exact', head: true })
-              .eq('league_id', id).eq('user_id', pickUserId)
-            if ((theirCount || 0) >= tpp) return
+              .eq('league_id', id).eq('user_id', user.id)
+            if ((myCount || 0) >= tpp) return
+            if (pickingRef.current) return
+            pickingRef.current = true
             const { error } = await supabase.from('picks').insert({
-              league_id: id, user_id: pickUserId, team_name: auto.n
+              league_id: id, user_id: user.id, team_name: auto.n
             })
             if (!error) {
-              await supabase.from('leagues').update({ draft_pos: freshLeague.draft_pos + 1 }).eq('id', id)
+              const newPos = effectivePos + 1
+              draftPosRef.current = newPos
+              setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
+              await supabase.from('leagues').update({
+                draft_pos: newPos,
+                pick_started_at: new Date().toISOString()
+              }).eq('id', id)
             }
+            pickingRef.current = false
           }, 100)
           return PICK_TIMER
         }
@@ -441,58 +531,62 @@ export default function LeaguePage() {
       })
     }, 1000)
     return () => clearInterval(timerRef.current)
-  }, [league?.draft_pos, draftStarted, mySlot, league?.size])
+  }, [league?.draft_pos, league?.pick_started_at, draftStarted, mySlot, league?.size, picksOrdered.length])
 
-  async function makePick(teamName, isAuto = false) {
+  async function makePick(teamName) {
     if (!draftStarted) return
+    if (mySlot === null) return
     if (pickingRef.current) return
     pickingRef.current = true
 
     try {
-      // Always fetch fresh state from DB
-      const { data: freshLeague } = await supabase
+      const { data: lg } = await supabase
         .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
-      if (!freshLeague || !freshLeague.draft_started) return
+      if (!lg?.draft_started) return
 
-      const tpp = 48 / freshLeague.size
-      const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
+      // Use the higher of DB draft_pos or actual pick count
+      const effectivePos = Math.max(lg.draft_pos, picksOrdered.length)
+      const turn = getTurn(effectivePos, lg.size)
+      if (turn !== mySlot) return
 
-      // Only allow picking if it's this player's turn
-      if (whoseTurn !== mySlot) return
+      const tpp = 48 / lg.size
 
-      // Check team not already picked
-      const { count: existingCount } = await supabase
-        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('team_name', teamName)
-      if (existingCount && existingCount > 0) return
+      const { count: taken } = await supabase
+        .from('picks').select('id', { count: 'exact', head: true })
+        .eq('league_id', id).eq('team_name', teamName)
+      if (taken > 0) return
 
-      // Check player hasn't exceeded their allotment
       const { count: myCount } = await supabase
-        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('user_id', user.id)
-      if ((myCount || 0) >= tpp) return
+        .from('picks').select('id', { count: 'exact', head: true })
+        .eq('league_id', id).eq('user_id', user.id)
+      if (myCount >= tpp) return
 
-      // Insert pick
       const { error } = await supabase.from('picks').insert({
         league_id: id, user_id: user.id, team_name: teamName
       })
       if (error) return
 
+      const newPos = effectivePos + 1
+      draftPosRef.current = newPos
+      setPicks(prev => ({ ...prev, [teamName]: user.id }))
       setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
+      setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
       playSound('pick')
 
-      // Advance draft by exactly 1
-      await supabase.from('leagues').update({ draft_pos: freshLeague.draft_pos + 1 }).eq('id', id)
+      await supabase.from('leagues').update({
+        draft_pos: newPos,
+        pick_started_at: new Date().toISOString()
+      }).eq('id', id)
 
-      // Check if complete
-      const { count: totalCount } = await supabase
-        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id)
-      if ((totalCount || 0) >= 48) { setDraftComplete(true); playSound('complete') }
+      if (newPos >= tpp * lg.size) {
+        setDraftComplete(true)
+        playSound('complete')
+      }
 
     } finally {
-      // ALWAYS release the lock no matter what
       pickingRef.current = false
     }
   }
-
   // Push notification registration
   async function registerPushNotifications() {
     if (!('Notification' in window)) return false
@@ -566,8 +660,13 @@ export default function LeaguePage() {
     if ('Notification' in window && Notification.permission === 'default') {
       await Notification.requestPermission()
     }
-    await supabase.from('leagues').update({ draft_started: true, bracket_data: null }).eq('id', id)
+    await supabase.from('leagues').update({
+      draft_started: true,
+      bracket_data: null,
+      pick_started_at: new Date().toISOString()
+    }).eq('id', id)
     setDraftStarted(true)
+    didStartRef.current = true
     setTimeout(() => playSound('draft_start'), 100)
   }
 
@@ -589,22 +688,23 @@ export default function LeaguePage() {
   async function saveSchedule() {
     if (!scheduledTime) return
     const localDate = new Date(scheduledTime)
-    // Validate it's in the future
     if (localDate <= new Date()) {
-      alert('Invalid date/time — please enter a future time.')
+      alert('Please choose a future date and time.')
       return
     }
     setSavingSchedule(true)
-    await supabase.from('leagues').update({ scheduled_at: localDate.toISOString() }).eq('id', id)
+    const isoTime = localDate.toISOString()
+    await supabase.from('leagues').update({ scheduled_at: isoTime }).eq('id', id)
+    // Update local league state so countdown starts immediately without refresh
+    setLeague(prev => ({ ...prev, scheduled_at: isoTime }))
     setSavingSchedule(false)
-    alert('Draft time saved! ' + localDate.toLocaleString())
   }
 
   async function sendChat() {
     if (!chatInput.trim() || sendingChat) return
     setSendingChat(true)
     const me = members.find(m => m.user_id === user.id)
-    const name = me?.profiles?.username || me?.profiles?.email?.split('@')[0] || 'Player'
+    const name = me?.profile?.username || me?.profile?.email?.split('@')[0] || 'Player'
     await supabase.from('chat_messages').insert({
       league_id: id,
       user_id: user.id,
@@ -623,9 +723,9 @@ export default function LeaguePage() {
 
   function getDisplayName(m) {
     if (!m) return 'TBD'
-    // Try username first, then email prefix, then generic player number
-    const name = m.profiles?.username || m.profiles?.email?.split('@')[0]
-    if (name && name.length > 2) return name
+    const p = m.profile
+    if (p?.username?.trim()) return p.username.trim()
+    if (p?.email) return p.email.split('@')[0]
     return `Player ${(m.draft_slot ?? 0) + 1}`
   }
 
@@ -653,7 +753,10 @@ export default function LeaguePage() {
 
   const tpp = 48 / (league?.size || 4)
   const order = snakeOrder(league?.size || 4, 48)
-  const draftPos = league?.draft_pos || 0
+  // Use picksOrdered.length as the source of truth for whose turn it is
+  // This is more reliable than league.draft_pos because picks INSERT
+  // real-time fires correctly on all devices
+  const draftPos = Math.max(league?.draft_pos || 0, picksOrdered.length)
   const currentTurn = order[draftPos]
   const isMyTurn = currentTurn === mySlot
   const draftDone = draftDoneCalc
@@ -794,6 +897,7 @@ export default function LeaguePage() {
               { label: 'Refer Friends', icon: '🌍', action: () => { navigate('/referral'); setProfileMenuOpen(false) } },
               { label: 'Edit Profile', icon: '👤', action: () => { navigate('/profile'); setProfileMenuOpen(false) } },
               { label: 'How to Play', icon: '📖', action: () => { navigate('/how-to-play'); setProfileMenuOpen(false) } },
+              { label: 'Privacy Policy', icon: '🔒', action: () => { navigate('/privacy'); setProfileMenuOpen(false) } },
               { label: 'Sign Out', icon: '🚪', action: () => { signOut(); setProfileMenuOpen(false) }, danger: true },
             ].map(item => (
               <button key={item.label} onClick={item.action} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: item.danger ? '#FF9090' : 'var(--text)', textAlign: 'left', fontFamily: 'var(--font)' }}>
@@ -1181,9 +1285,12 @@ export default function LeaguePage() {
                         return next
                       })
                       setPicksOrdered(prev => prev.filter(p => p.id !== lastPick.id && p.team_name !== lastPick.team_name))
-                      // Step 3: go back 1 draft position
+                      // Step 3: go back 1 draft position and reset timer
                       const newPos = Math.max(0, (league?.draft_pos || 1) - 1)
-                      await supabase.from('leagues').update({ draft_pos: newPos }).eq('id', id)
+                      await supabase.from('leagues').update({
+                        draft_pos: newPos,
+                        pick_started_at: new Date().toISOString()
+                      }).eq('id', id)
                       // Real-time will sync other clients via DELETE subscription
                     }}
                   >
@@ -1193,13 +1300,19 @@ export default function LeaguePage() {
                     className="btn btn-secondary"
                     style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090', borderColor: 'rgba(255,75,75,.3)' }}
                     onClick={async () => {
-                      if (!window.confirm('Restart the entire draft? ALL picks deleted, everyone starts over.')) return
-                      // Delete all picks first
+                      if (!window.confirm('Restart the entire draft? ALL picks will be deleted and the draft will go back to not started.')) return
+                      // Step 1: Reset league in DB first — real-time fires for all clients
+                      await supabase.from('leagues').update({
+                        draft_pos: 0,
+                        draft_started: false,
+                        bracket_data: null,
+                        pick_started_at: null,
+                        scheduled_at: null
+                      }).eq('id', id)
+                      // Step 2: Delete all picks — real-time DELETE fires for all clients
                       await supabase.from('picks').delete().eq('league_id', id)
-                      // Reset league state — real-time subscription will sync all clients
-                      await supabase.from('leagues')
-                        .update({ draft_pos: 0, draft_started: false, bracket_data: null })
-                        .eq('id', id)
+                      // Step 3: load() is called by the real-time handler — no local state changes here
+                      // This prevents the flash caused by multiple rapid state updates
                     }}
                   >
                     🔄 Restart draft
@@ -1280,7 +1393,7 @@ export default function LeaguePage() {
                     const isTakenByOther = owner !== undefined && !isMine && !isBot
                     const isAnyonePicked = owner !== undefined
                     const ownerMember = isTakenByOther ? members.find(m => m.user_id === owner) : null
-                    const canPick = draftStarted && isMyTurn && !draftDone && !isAnyonePicked
+                    const canPick = draftStarted && isMyTurn && !draftDone && !isAnyonePicked && getTurn(draftPosRef.current, league?.size || 4) === mySlot
                     return (
                       <div key={t.n} className={`team-card ${isMine ? 'mine' : ''} ${isAnyonePicked && !isMine ? 'taken' : ''}`} onClick={() => canPick && makePick(t.n)} style={{ cursor: canPick ? 'pointer' : isAnyonePicked ? 'not-allowed' : 'default' }}>
                         {isMine && <div className="pick-check">✓</div>}
@@ -1602,8 +1715,8 @@ export default function LeaguePage() {
                           {msg.username}
                           {(isMe || isCommissioner) && (
                             <button onClick={async () => {
-                              await supabase.from('chat_messages').delete().eq('id', msg.id)
-                              setChatMessages(prev => prev.filter(m => m.id !== msg.id))
+                              const { error } = await supabase.from('chat_messages').delete().eq('id', msg.id)
+                              if (!error) setChatMessages(prev => prev.filter(m => m.id !== msg.id))
                             }} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 10, padding: '0 2px', lineHeight: 1 }}>✕</button>
                           )}
                         </div>
