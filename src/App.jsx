@@ -7,8 +7,9 @@ import LeaguePage from './pages/LeaguePage'
 import ProfilePage from './pages/ProfilePage'
 import HowToPlayPage from './pages/HowToPlayPage'
 import TermsPage from './pages/TermsPage'
-import ReferralPage from './pages/ReferralPage'
 import PrivacyPage from './pages/PrivacyPage'
+import ReferralPage from './pages/ReferralPage'
+import InstallPrompt from './components/InstallPrompt'
 import './index.css'
 
 function ProtectedRoute({ children }) {
@@ -21,18 +22,21 @@ function AppRoutes() {
   const { user, loading } = useAuth()
   if (loading) return null
   return (
-    <Routes>
-      <Route path="/auth" element={user ? <Navigate to="/" replace /> : <AuthPage />} />
-      <Route path="/" element={<ProtectedRoute><WelcomePage /></ProtectedRoute>} />
-      <Route path="/home" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
-      <Route path="/league/:id" element={<ProtectedRoute><LeaguePage /></ProtectedRoute>} />
-      <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-      <Route path="/how-to-play" element={<ProtectedRoute><HowToPlayPage /></ProtectedRoute>} />
-      <Route path="/terms" element={<TermsPage />} />
-      <Route path="/privacy" element={<PrivacyPage />} />
-      <Route path="/referral" element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/auth" element={user ? <Navigate to="/" replace /> : <AuthPage />} />
+        <Route path="/" element={<ProtectedRoute><WelcomePage /></ProtectedRoute>} />
+        <Route path="/home" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+        <Route path="/league/:id" element={<ProtectedRoute><LeaguePage /></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+        <Route path="/how-to-play" element={<ProtectedRoute><HowToPlayPage /></ProtectedRoute>} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/referral" element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      <InstallPrompt />
+    </>
   )
 }
 

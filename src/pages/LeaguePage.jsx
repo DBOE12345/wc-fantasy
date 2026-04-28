@@ -35,7 +35,7 @@ const AV_BG = ['#1a3a2a','#1a2a3a','#3a2a1a','#2a1a3a','#3a1a1a','#1a3a3a','#2a3
 const AV_FG = ['#5DCAA5','#85B7EB','#FAC775','#AFA9EC','#F09595','#5DCAA5','#C0DD97','#FAC775']
 const BAR_C = ['#1D9E75','#378ADD','#EF9F27','#D85A30','#7F77DD','#639922','#D4537E','#888780']
 const STAGE_CSS = {
-  'Champion':'stage-ch','Runner-up':'stage-ru','Semi-final':'stage-sf',
+  'Champion':'stage-ch','Final':'stage-ru','Semi-final':'stage-sf',
   'Quarter-final':'stage-qf','Round of 16':'stage-r16','Round of 32':'stage-r32','Group stage':'stage-gs'
 }
 const PICK_TIMER = 60
@@ -436,6 +436,22 @@ export default function LeaguePage() {
     const t = setInterval(tick, 1000)
     return () => clearInterval(t)
   }, [league?.scheduled_at, draftStarted, id])
+
+  // When player returns to tab/app, resync timer from server timestamp
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible' && draftStarted) {
+        // Force timer to recalculate from pick_started_at
+        if (timerRef.current) clearInterval(timerRef.current)
+        const pickStarted = league?.pick_started_at ? new Date(league.pick_started_at) : null
+        const elapsed = pickStarted ? Math.floor((Date.now() - pickStarted.getTime()) / 1000) : 0
+        const remaining = Math.max(1, PICK_TIMER - elapsed)
+        setTimeLeft(remaining)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [draftStarted, league?.pick_started_at])
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -967,7 +983,7 @@ export default function LeaguePage() {
         const p = rankedMembers.find(m => m.id === selectedPlayer.id) || selectedPlayer
         const stageBonus = bracket?.stageBonus || {}
         const STAGE_CSS_MAP = {
-          'Champion':'stage-ch','Runner-up':'stage-ru','Semi-final':'stage-sf',
+          'Champion':'stage-ch','Final':'stage-ru','Semi-final':'stage-sf',
           'Quarter-final':'stage-qf','Round of 16':'stage-r16','Round of 32':'stage-r32','Group stage':'stage-gs'
         }
         return (
@@ -989,7 +1005,7 @@ export default function LeaguePage() {
                   let stageLabel = 'Group stage'
                   if (bracket) {
                     if (bracket.champ?.n === n) stageLabel = 'Champion'
-                    else if (bracket.final?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Runner-up'
+                    else if (bracket.final?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Final'
                     else if (bracket.sf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Semi-final'
                     else if (bracket.qf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Quarter-final'
                     else if (bracket.r16?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Round of 16'
@@ -1711,7 +1727,7 @@ export default function LeaguePage() {
                     let stageLabel = 'Group stage'
                     if (bracket) {
                       if (bracket.champ?.n === selectedTeam) stageLabel = 'Champion'
-                      else if (bracket.final?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Runner-up'
+                      else if (bracket.final?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Final'
                       else if (bracket.sf?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Semi-final'
                       else if (bracket.qf?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Quarter-final'
                       else if (bracket.r16?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Round of 16'
@@ -1801,7 +1817,7 @@ export default function LeaguePage() {
                       let stageLabel = 'Group stage'
                       if (bracket) {
                         if (bracket.champ?.n === n) stageLabel = 'Champion'
-                        else if (bracket.final?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Runner-up'
+                        else if (bracket.final?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Final'
                         else if (bracket.sf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Semi-final'
                         else if (bracket.qf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Quarter-final'
                         else if (bracket.r16?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Round of 16'
