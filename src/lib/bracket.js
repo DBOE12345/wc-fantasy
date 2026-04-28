@@ -2,25 +2,15 @@ import { TEAMS, SCORING } from './teams.js'
 
 function rnd() { return Math.random() }
 
-// Returns goals for a match. In knockout, if tied, one team wins on penalties
-// penWin = true means team A wins on pens (goals stay equal for scoring purposes)
 function playMatch(sa, sb, knockout = false) {
   const w = Math.min(0.85, Math.max(0.15, 0.42 + (sa - sb) / 140))
   let ag = Math.max(0, Math.round(rnd() * 2.5))
   let bg = Math.max(0, Math.round(rnd() * 2.5))
   const r = rnd()
   if (r < w) { if (ag <= bg) ag = bg + 1 }
-  else if (r < w + 0.22) {
-    if (knockout) {
-      // Draw in knockout — goes to pens, keep scores equal
-      bg = ag
-    } else {
-      bg = ag // draw in group stage
-    }
-  }
+  else if (r < w + 0.22) { bg = ag }
   else { if (bg <= ag) bg = ag + 1 }
 
-  // In knockout if still tied, determine pen winner
   let penWinner = null
   if (knockout && ag === bg) {
     penWinner = rnd() < w ? 'a' : 'b'
@@ -62,7 +52,6 @@ export function simulateBracket() {
     for (let i = 0; i + 1 < teams.length; i += 2) {
       const a = teams[i], b = teams[i + 1]
       const { ag, bg, penWinner } = playMatch(a.s, b.s, true)
-      // Winner: if scores differ use score, if equal use pen winner
       const w = ag > bg ? a : bg > ag ? b : penWinner === 'a' ? a : b
       const l = w === a ? b : a
       matches.push({ a, b, ag, bg, penWinner, w })
@@ -76,29 +65,26 @@ export function simulateBracket() {
   const rd16 = ko(rd32.winners)
   const rdqf = ko(rd16.winners)
   const rdsf = ko(rdqf.winners)
-  // 3rd place match between semi-final losers
   const third = ko(rdsf.losers)
   const rdfin = ko(rdsf.winners)
   const champ = rdfin.winners[0]
   const ruTeam = rdfin.losers[0]
 
-  // Build stageBonus map — cumulative
-  // Each stage bonus is ADDITIONAL points on top of previous
+  // stageBonus = CUMULATIVE additional points per round advanced
+  // R32: +5, R16: +8 more, QF: +12 more, SF: +20 more, Final: +30 more, Champion: +40 more
   const stageBonus = {}
   const add = (t, pts) => { stageBonus[t.n] = (stageBonus[t.n] || 0) + pts }
 
-  // Everyone who made R32 gets r32 points
-  r32teams.forEach(t => add(t, SCORING.r32))
-  // R16 winners get additional r16 points
-  rd16.winners.forEach(t => add(t, SCORING.r16))
-  // QF winners get additional qf points
-  rdqf.winners.forEach(t => add(t, SCORING.qf))
-  // SF winners get additional sf points
-  rdsf.winners.forEach(t => add(t, SCORING.sf))
-  // Runner-up gets additional ru points
-  if (ruTeam) add(ruTeam, SCORING.ru - SCORING.sf)
-  // Champion gets additional ch points on top of ru
-  if (champ) add(champ, SCORING.ch - SCORING.ru)
+  r32teams.forEach(t => add(t, SCORING.r32))          // +5 for making R32
+  rd16.winners.forEach(t => add(t, SCORING.r16))      // +8 for making R16
+  rdqf.winners.forEach(t => add(t, SCORING.qf))       // +12 for making QF
+  rdsf.winners.forEach(t => add(t, SCORING.sf))       // +20 for making SF
+  if (ruTeam) add(ruTeam, SCORING.ru)                  // +30 for making Final
+  if (champ) add(champ, SCORING.ch)                    // +40 for winning it all
+
+  // Champion total: 5+8+12+20+30+40 = 115 pts
+  // Runner-up total: 5+8+12+20+30 = 75 pts
+  // Semi-finalist total: 5+8+12+20 = 45 pts
 
   return {
     r32: rd32.matches,
