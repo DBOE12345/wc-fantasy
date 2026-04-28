@@ -51,6 +51,7 @@ function getAudioCtx() {
 function playSound(type) {
   try {
     const ctx = getAudioCtx()
+    if (ctx.state === 'suspended') { ctx.resume() }
 
     if (type === 'draft_start') {
       // Stadium horn + crowd build up
@@ -877,12 +878,17 @@ export default function LeaguePage() {
   }
 
   // Trigger draft complete popup - only fires when draft JUST completed, not on page reload
-  const prevDraftDoneRef = useRef(false)
+  const prevDraftDoneRef = useRef(null) // null = not yet initialized
   const draftDoneCalc = (league?.draft_pos || 0) >= snakeOrder(league?.size || 4, 48).length || Object.keys(picks).length >= 48
   useEffect(() => {
-    if (loading) return // don't fire during initial load
+    if (loading) return
+    if (prevDraftDoneRef.current === null) {
+      // First render after load - record state but NEVER show popup
+      prevDraftDoneRef.current = draftDoneCalc
+      return
+    }
+    // Only show popup if we transitioned from false → true during this session
     if (draftDoneCalc && !prevDraftDoneRef.current && draftStarted) {
-      // Only show popup if we just transitioned to done - not if it was already done on load
       setDraftComplete(true)
       playSound('complete')
     }
