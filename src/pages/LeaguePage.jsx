@@ -1393,7 +1393,7 @@ export default function LeaguePage() {
                     const isTakenByOther = owner !== undefined && !isMine && !isBot
                     const isAnyonePicked = owner !== undefined
                     const ownerMember = isTakenByOther ? members.find(m => m.user_id === owner) : null
-                    const canPick = draftStarted && isMyTurn && !draftDone && !isAnyonePicked && getTurn(draftPosRef.current, league?.size || 4) === mySlot
+                    const canPick = draftStarted && isMyTurn && !draftDone && !isAnyonePicked
                     return (
                       <div key={t.n} className={`team-card ${isMine ? 'mine' : ''} ${isAnyonePicked && !isMine ? 'taken' : ''}`} onClick={() => canPick && makePick(t.n)} style={{ cursor: canPick ? 'pointer' : isAnyonePicked ? 'not-allowed' : 'default' }}>
                         {isMine && <div className="pick-check">✓</div>}
