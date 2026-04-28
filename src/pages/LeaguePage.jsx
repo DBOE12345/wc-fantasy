@@ -231,6 +231,10 @@ export default function LeaguePage() {
     // Set draft started state - trust the DB value
     setDraftStarted(!!lg.draft_started)
 
+    // If draft is already complete when loading, mark prevDraftDoneRef so popup never shows
+    const alreadyDone = (lg.draft_pos || 0) >= snakeOrder(lg.size || 4, 48).length || (pickData?.length || 0) >= 48
+    if (alreadyDone) prevDraftDoneRef.current = true
+
     // Bracket
     if (lg.bracket_data) {
       try { setBracket(JSON.parse(lg.bracket_data)) } catch(e) {}
@@ -715,6 +719,140 @@ export default function LeaguePage() {
     setSendingChat(false)
   }
 
+
+  // =============================================
+  // TOURNAMENT SIMULATION (Commissioner only)
+  // Tests all point calculations with fake match data
+  // =============================================
+  const [simRunning, setSimRunning] = useState(false)
+  const [simResults, setSimResults] = useState(null)
+
+  async function simulateTournament() {
+    setSimRunning(true)
+    setSimResults(null)
+
+    try {
+      // Step 1: Simulate full bracket
+      const bracket = simulateBracket()
+
+      // Step 2: Generate fake fixtures for ALL matches
+      // Group stage: 12 groups x 6 matches = 72 matches
+      // Knockout: 32 + 16 + 8 + 4 + 2 + 1 = 63... actually 32+16+8+4+2+1 = no
+      // R32=16 matches, R16=8, QF=4, SF=2, Final=1 = 31 matches
+      // Total: 72 + 31 = 103 matches + 3rd place = 104
+      const fakeFixtures = []
+      let fixtureId = 1
+
+      function makeFixture(homeTeam, awayTeam, homeGoals, awayGoals, round, stage, redCards = [], ownGoals = []) {
+        const homeId = TEAMS.find(t => t.n === homeTeam.n)?.apiId || fixtureId * 10
+        const awayId = TEAMS.find(t => t.n === awayTeam.n)?.apiId || fixtureId * 10 + 1
+        const events = []
+        // Add red card events
+        redCards.forEach(team => {
+          const tId = team === homeTeam.n ? homeId : awayId
+          events.push({ team: { id: tId }, detail: 'Red Card', type: 'Card' })
+        })
+        // Add own goal events
+        ownGoals.forEach(team => {
+          const tId = team === homeTeam.n ? homeId : awayId
+          events.push({ team: { id: tId }, detail: 'Own Goal', type: 'Goal' })
+        })
+        return {
+          fixture: { id: fixtureId++, status: { short: 'FT' }, date: '2026-06-15T18:00:00+00:00' },
+          league: { round: round },
+          teams: {
+            home: { id: homeId, name: homeTeam.n },
+            away: { id: awayId, name: awayTeam.n }
+          },
+          goals: { home: homeGoals, away: awayGoals },
+          events,
+        }
+      }
+
+      // Generate group stage fixtures from bracket data
+      // We need to reconstruct group stage results
+      // Use the team strength scores to generate realistic group stage results
+      const shuffled = TEAMS.slice().sort((a, b) => b.s - a.s)
+      const groups = []
+      for (let g = 0; g < 12; g++) {
+        const groupTeams = TEAMS.filter(t => t.g === String.fromCharCode(65 + g))
+        groups.push(groupTeams)
+      }
+
+      // Generate group stage matches for all 12 groups
+      groups.forEach((grp, gi) => {
+        const groupLetter = String.fromCharCode(65 + gi)
+        for (let i = 0; i < grp.length; i++) {
+          for (let j = i + 1; j < grp.length; j++) {
+            const home = grp[i]
+            const away = grp[j]
+            const strengthDiff = (home.s - away.s) / 140
+            const homeWinProb = Math.min(0.75, Math.max(0.25, 0.45 + strengthDiff))
+            const r = Math.random()
+            let hg = Math.max(0, Math.round(Math.random() * 2.5))
+            let ag = Math.max(0, Math.round(Math.random() * 2.5))
+            if (r < homeWinProb) { if (hg <= ag) hg = ag + 1 }
+            else if (r < homeWinProb + 0.22) { ag = hg }
+            else { if (ag <= hg) ag = hg + 1 }
+            // Occasionally add red cards and own goals for testing
+            const redCards = Math.random() < 0.08 ? [Math.random() < 0.5 ? home.n : away.n] : []
+            const ownGoals = Math.random() < 0.05 ? [Math.random() < 0.5 ? home.n : away.n] : []
+            fakeFixtures.push(makeFixture(home, away, hg, ag, `Group ${groupLetter}`, 'group', redCards, ownGoals))
+          }
+        }
+      })
+
+      // Generate knockout stage fixtures from bracket
+      const stages = [
+        { matches: bracket.r32, round: 'Round of 32' },
+        { matches: bracket.r16, round: 'Round of 16' },
+        { matches: bracket.qf, round: 'Quarter-finals' },
+        { matches: bracket.sf, round: 'Semi-finals' },
+        { matches: bracket.final, round: 'Final' },
+      ]
+
+      stages.forEach(({ matches, round }) => {
+        if (!matches) return
+        matches.forEach(m => {
+          if (!m.a || !m.b) return
+          fakeFixtures.push(makeFixture(m.a, m.b, m.ag, m.bg, round, 'knockout'))
+        })
+      })
+
+      // Step 3: Calculate points for all members
+      const results = members.map(m => {
+        const mPicks = Object.entries(picks).filter(([, uid]) => uid === m.user_id).map(([t]) => t)
+        const { total, breakdown } = calcTotalPoints(fakeFixtures, mPicks, bracket.stageBonus || {})
+        return {
+          ...m,
+          simPts: total,
+          simBreakdown: breakdown,
+          simPicks: mPicks,
+        }
+      }).sort((a, b) => b.simPts - a.simPts)
+
+      setSimResults({ results, bracket, fixtures: fakeFixtures })
+      setFixtures(fakeFixtures)
+
+      // Save bracket to DB so bracket tab shows results
+      await supabase.from('leagues').update({
+        bracket_data: JSON.stringify(bracket)
+      }).eq('id', id)
+      setBracket(bracket)
+
+    } catch(e) {
+      alert('Simulation error: ' + e.message)
+    }
+    setSimRunning(false)
+  }
+
+  function clearSimulation() {
+    setSimResults(null)
+    setFixtures([])
+    setBracket(null)
+    supabase.from('leagues').update({ bracket_data: null }).eq('id', id)
+  }
+
   function copyCode() {
     navigator.clipboard.writeText(league?.code || '')
     setCopied(true)
@@ -738,16 +876,18 @@ export default function LeaguePage() {
     }).sort((a, b) => b.computedPts - a.computedPts)
   }
 
-  // Trigger draft complete popup - MUST be before any conditional returns
+  // Trigger draft complete popup - only fires when draft JUST completed, not on page reload
   const prevDraftDoneRef = useRef(false)
   const draftDoneCalc = (league?.draft_pos || 0) >= snakeOrder(league?.size || 4, 48).length || Object.keys(picks).length >= 48
   useEffect(() => {
+    if (loading) return // don't fire during initial load
     if (draftDoneCalc && !prevDraftDoneRef.current && draftStarted) {
+      // Only show popup if we just transitioned to done - not if it was already done on load
       setDraftComplete(true)
       playSound('complete')
     }
     prevDraftDoneRef.current = draftDoneCalc
-  }, [draftDoneCalc, draftStarted])
+  }, [draftDoneCalc, draftStarted, loading])
 
   if (loading) return <div className="container page-wrap"><div className="empty">Loading league...</div></div>
 
@@ -1063,7 +1203,70 @@ export default function LeaguePage() {
               )
             })()}
 
-            {/* Live Scores Widget — shows after WC starts June 11 2026 */}
+            {/* Tournament Simulation — Commissioner only, for testing */}
+            {isCommissioner && draftDone && (
+              <div style={{ background: 'rgba(93,202,165,.06)', border: '1px solid rgba(93,202,165,.2)', borderRadius: 14, padding: '1rem 1.1rem', marginTop: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 14, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text)' }}>
+                      🧪 Simulate Tournament
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>Commissioner only — generates all 104 matches to test scoring</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: 12, padding: '8px 14px' }}
+                    onClick={simulateTournament}
+                    disabled={simRunning}
+                  >
+                    {simRunning ? '⏳ Simulating...' : '▶ Run simulation'}
+                  </button>
+                  {simResults && (
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090' }}
+                      onClick={clearSimulation}
+                    >
+                      ✕ Clear results
+                    </button>
+                  )}
+                </div>
+
+                {simResults && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+                      Simulated Final Standings ({simResults.fixtures.length} matches played)
+                    </div>
+                    {simResults.results.map((m, i) => (
+                      <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < simResults.results.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                        <span style={{ fontSize: 13, color: i === 0 ? '#FAC775' : 'var(--text3)', fontWeight: 700, minWidth: 20 }}>
+                          {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`}
+                        </span>
+                        <div className="avatar" style={{ background: AV_BG[m.draft_slot % 8], color: AV_FG[m.draft_slot % 8], width: 28, height: 28, fontSize: 10 }}>
+                          {getDisplayName(m).slice(0,2).toUpperCase()}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                            {getDisplayName(m)} {m.user_id === user.id && <span style={{ fontSize: 10, color: 'var(--text3)' }}>(you)</span>}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
+                            {m.simPicks.length} teams · champion: {simResults.bracket?.champ?.n && m.simPicks.includes(simResults.bracket.champ.n) ? <span style={{ color: '#FAC775' }}>🏆 {simResults.bracket.champ.n}</span> : 'none'}
+                          </div>
+                        </div>
+                        <div style={{ fontFamily: 'var(--mono)', fontWeight: 900, fontSize: 16, color: '#5DCAA5' }}>
+                          {m.simPts} pts
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text3)', lineHeight: 1.6 }}>
+                      💡 Check My Teams tab and Bracket tab to see full point breakdowns. Run again for different results.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {draftDone && (() => {
               const wcStartDate = new Date('2026-06-11T00:00:00Z')
               const isLive = new Date() >= wcStartDate
