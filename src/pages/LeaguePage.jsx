@@ -51,7 +51,7 @@ function getAudioCtx() {
 function playSound(type) {
   try {
     const ctx = getAudioCtx()
-    if (ctx.state === 'suspended') { ctx.resume() }
+    if (ctx.state === 'suspended') { ctx.resume().catch(() => {}) }
 
     if (type === 'draft_start') {
       // Stadium horn + crowd build up
@@ -804,20 +804,46 @@ export default function LeaguePage() {
       })
 
       // Generate knockout stage fixtures from bracket
+      // In knockout, if teams are tied and there's a penWinner, 
+      // we use status 'PEN' so calcMatchPoints gives win to the advancing team
+      function makeKOFixture(m, round) {
+        if (!m.a || !m.b) return
+        const homeId = TEAMS.find(t => t.n === m.a.n)?.apiId || fixtureId * 10
+        const awayId = TEAMS.find(t => t.n === m.b.n)?.apiId || fixtureId * 10 + 1
+        // If pen winner, adjust goals so winner has 1 more (pens decided it)
+        // Actually for scoring: draw in regulation = 2pts each, pen win = counted as win
+        // We use status PEN and give winner +1 goal to signal win
+        let hg = m.ag, ag2 = m.bg
+        const isPen = m.penWinner !== null && m.penWinner !== undefined
+        if (isPen) {
+          // Keep regulation score equal but add +1 to winner's tally for scoring
+          if (m.penWinner === 'a') hg = m.ag + 1
+          else ag2 = m.bg + 1
+        }
+        fakeFixtures.push({
+          fixture: { id: fixtureId++, status: { short: isPen ? 'PEN' : 'FT' }, date: '2026-06-28T18:00:00+00:00' },
+          league: { round },
+          teams: {
+            home: { id: homeId, name: m.a.n },
+            away: { id: awayId, name: m.b.n }
+          },
+          goals: { home: hg, away: ag2 },
+          events: [],
+        })
+      }
+
       const stages = [
         { matches: bracket.r32, round: 'Round of 32' },
         { matches: bracket.r16, round: 'Round of 16' },
         { matches: bracket.qf, round: 'Quarter-finals' },
         { matches: bracket.sf, round: 'Semi-finals' },
+        { matches: bracket.third, round: '3rd Place' },
         { matches: bracket.final, round: 'Final' },
       ]
 
       stages.forEach(({ matches, round }) => {
         if (!matches) return
-        matches.forEach(m => {
-          if (!m.a || !m.b) return
-          fakeFixtures.push(makeFixture(m.a, m.b, m.ag, m.bg, round, 'knockout'))
-        })
+        matches.forEach(m => makeKOFixture(m, round))
       })
 
       // Step 3: Calculate points for all members
@@ -963,13 +989,11 @@ export default function LeaguePage() {
                   let stageLabel = 'Group stage'
                   if (bracket) {
                     if (bracket.champ?.n === n) stageLabel = 'Champion'
-                    else {
-                      for (const {d, l} of [
-                        {d:bracket.final,l:'Runner-up'},{d:bracket.sf,l:'Semi-final'},
-                        {d:bracket.qf,l:'Quarter-final'},{d:bracket.r16,l:'Round of 16'},
-                        {d:bracket.r32,l:'Round of 32'}
-                      ]) { if (d?.some(m => m.w?.n === n)) { stageLabel = l; break } }
-                    }
+                    else if (bracket.final?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Runner-up'
+                    else if (bracket.sf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Semi-final'
+                    else if (bracket.qf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Quarter-final'
+                    else if (bracket.r16?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Round of 16'
+                    else if (bracket.r32?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Round of 32'
                   }
                   const teamBreakdown = p.breakdown?.[n]
                   const matchPts = Math.max(0, (teamBreakdown?.pts || 0) - bonus)
@@ -1687,15 +1711,11 @@ export default function LeaguePage() {
                     let stageLabel = 'Group stage'
                     if (bracket) {
                       if (bracket.champ?.n === selectedTeam) stageLabel = 'Champion'
-                      else {
-                        for (const { d, l } of [
-                          { d: bracket.final, l: 'Runner-up' },
-                          { d: bracket.sf, l: 'Semi-final' },
-                          { d: bracket.qf, l: 'Quarter-final' },
-                          { d: bracket.r16, l: 'Round of 16' },
-                          { d: bracket.r32, l: 'Round of 32' },
-                        ]) { if (d?.some(m => m.w?.n === selectedTeam)) { stageLabel = l; break } }
-                      }
+                      else if (bracket.final?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Runner-up'
+                      else if (bracket.sf?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Semi-final'
+                      else if (bracket.qf?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Quarter-final'
+                      else if (bracket.r16?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Round of 16'
+                      else if (bracket.r32?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Round of 32'
                     }
                     return (
                       <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 500, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setSelectedTeam(null)}>
@@ -1781,15 +1801,11 @@ export default function LeaguePage() {
                       let stageLabel = 'Group stage'
                       if (bracket) {
                         if (bracket.champ?.n === n) stageLabel = 'Champion'
-                        else {
-                          for (const { d, l } of [
-                            { d: bracket.final, l: 'Runner-up' },
-                            { d: bracket.sf, l: 'Semi-final' },
-                            { d: bracket.qf, l: 'Quarter-final' },
-                            { d: bracket.r16, l: 'Round of 16' },
-                            { d: bracket.r32, l: 'Round of 32' },
-                          ]) { if (d?.some(m => m.w?.n === n)) { stageLabel = l; break } }
-                        }
+                        else if (bracket.final?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Runner-up'
+                        else if (bracket.sf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Semi-final'
+                        else if (bracket.qf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Quarter-final'
+                        else if (bracket.r16?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Round of 16'
+                        else if (bracket.r32?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Round of 32'
                       }
                       return (
                         <div key={n} onClick={() => setSelectedTeam(n)} style={{ background: 'var(--bg2)', border: `1px solid ${selectedTeam === n ? 'var(--clay)' : 'var(--border)'}`, borderRadius: 10, padding: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
