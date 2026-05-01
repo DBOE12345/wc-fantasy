@@ -183,6 +183,7 @@ export default function LeaguePage() {
   const timerRef = useRef(null)
   const tickIntervalRef = useRef(null) // ticking sound interval - must be cleared when draft ends
   const pickingRef = useRef(false) // prevents double picks
+  const autoPickFiredRef = useRef(null) // tracks which pick_started_at triggered auto-pick
 
   const mySlotRef = useRef(null)
   useEffect(() => { mySlotRef.current = mySlot }, [mySlot])
@@ -330,6 +331,11 @@ export default function LeaguePage() {
 
       if (updated.bracket_data) {
         try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+      } else if (updated.bracket_data === null) {
+        // Commissioner cleared the simulation - clear for all players
+        setBracket(null)
+        setFixtures([])
+        setSimResults(null)
       }
     })
 
@@ -541,6 +547,10 @@ export default function LeaguePage() {
             if (freshLeague.pick_started_at) {
               const serverElapsed = Math.floor((Date.now() - new Date(freshLeague.pick_started_at).getTime()) / 1000)
               if (serverElapsed < PICK_TIMER - 2) return // timer hasn't actually expired yet
+
+              // Prevent firing twice for the same pick slot
+              if (autoPickFiredRef.current === freshLeague.pick_started_at) return
+              autoPickFiredRef.current = freshLeague.pick_started_at
             }
 
             // Use actual pick count as source of truth - same as display logic
@@ -571,10 +581,12 @@ export default function LeaguePage() {
             if (!error) {
               const newPos = effectivePos + 1
               draftPosRef.current = newPos
-              setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
+              // Don't set pick_started_at locally - let real-time sync it for everyone
+              setLeague(prev => prev ? { ...prev, draft_pos: newPos } : prev)
+              const now = new Date().toISOString()
               await supabase.from('leagues').update({
                 draft_pos: newPos,
-                pick_started_at: new Date().toISOString()
+                pick_started_at: now
               }).eq('id', id)
             }
             pickingRef.current = false
@@ -588,7 +600,7 @@ export default function LeaguePage() {
       clearInterval(timerRef.current)
       if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null }
     }
-  }, [league?.pick_started_at, draftStarted, mySlot, league?.size, league?.draft_pos])
+  }, [league?.pick_started_at, draftStarted, mySlot, league?.size])
 
   async function makePick(teamName) {
     if (!draftStarted) return
@@ -627,12 +639,17 @@ export default function LeaguePage() {
       draftPosRef.current = newPos
       setPicks(prev => ({ ...prev, [teamName]: user.id }))
       setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
-      setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
+      // Update draft_pos locally but NOT pick_started_at
+      // pick_started_at will come back via real-time leagues UPDATE
+      // This ensures everyone including the picker syncs from the same DB timestamp
+      setLeague(prev => prev ? { ...prev, draft_pos: newPos } : prev)
       playSound('pick')
+      autoPickFiredRef.current = null // reset so auto-pick can fire for next round if needed
 
+      const now = new Date().toISOString()
       await supabase.from('leagues').update({
         draft_pos: newPos,
-        pick_started_at: new Date().toISOString()
+        pick_started_at: now
       }).eq('id', id)
 
       if (newPos >= tpp * lg.size) {

@@ -47,12 +47,12 @@ export default function WelcomePage() {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 72px)', padding: '2rem', textAlign: 'center', position: 'relative', zIndex: 5 }}>
 
         {/* Big DU logo */}
-        <div style={{ marginBottom: 8 }}>
-          <img src={stackedImg} alt="DubUp Fantasy" style={{ width: 'min(300px, 75vw)', height: 'auto', objectFit: 'contain' }} />
+        <div style={{ marginBottom: 16 }}>
+          <img src={stackedImg} alt="DubUp Fantasy" style={{ width: 'min(380px, 90vw)', height: 'auto', objectFit: 'contain' }} />
         </div>
 
         {/* Tagline */}
-        <div style={{ fontSize: 15, color: 'var(--sand)', marginBottom: 48, letterSpacing: '.04em', textAlign: 'center', lineHeight: 1.7, fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase' }}>
+        <div style={{ fontSize: 15, color: 'var(--sand)', marginBottom: 32, letterSpacing: '.04em', textAlign: 'center', lineHeight: 1.7, fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase' }}>
           Play for Pride.<br/>Play for Glory.<br/><span style={{ color: 'var(--clay)' }}>Play for Dubs.</span>
         </div>
 
