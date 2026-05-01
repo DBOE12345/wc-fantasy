@@ -581,12 +581,11 @@ export default function LeaguePage() {
             if (!error) {
               const newPos = effectivePos + 1
               draftPosRef.current = newPos
-              // Don't set pick_started_at locally - let real-time sync it for everyone
-              setLeague(prev => prev ? { ...prev, draft_pos: newPos } : prev)
-              const now = new Date().toISOString()
+              const pickTimestamp = new Date().toISOString()
+              setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: pickTimestamp } : prev)
               await supabase.from('leagues').update({
                 draft_pos: newPos,
-                pick_started_at: now
+                pick_started_at: pickTimestamp
               }).eq('id', id)
             }
             pickingRef.current = false
@@ -637,19 +636,18 @@ export default function LeaguePage() {
 
       const newPos = effectivePos + 1
       draftPosRef.current = newPos
+      const pickTimestamp = new Date().toISOString()
       setPicks(prev => ({ ...prev, [teamName]: user.id }))
-      setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
-      // Update draft_pos locally but NOT pick_started_at
-      // pick_started_at will come back via real-time leagues UPDATE
-      // This ensures everyone including the picker syncs from the same DB timestamp
-      setLeague(prev => prev ? { ...prev, draft_pos: newPos } : prev)
+      setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: pickTimestamp }])
+      // Set pick_started_at locally with same timestamp as DB write
+      // This resets timer immediately for the picker, and DB write syncs everyone else
+      setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: pickTimestamp } : prev)
       playSound('pick')
-      autoPickFiredRef.current = null // reset so auto-pick can fire for next round if needed
+      autoPickFiredRef.current = null
 
-      const now = new Date().toISOString()
       await supabase.from('leagues').update({
         draft_pos: newPos,
-        pick_started_at: now
+        pick_started_at: pickTimestamp
       }).eq('id', id)
 
       if (newPos >= tpp * lg.size) {
