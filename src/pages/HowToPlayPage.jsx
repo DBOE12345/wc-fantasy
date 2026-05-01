@@ -20,12 +20,12 @@ export default function HowToPlayPage() {
     { label: 'Clean sheet', pts: '+3 pts', desc: 'Team keeps a clean sheet (0 goals conceded)' },
     { label: 'Own goal', pts: '-1 pt', desc: 'Per own goal scored by your team', neg: true },
     { label: 'Red card', pts: '-2 pts', desc: 'Per red card received by your team', neg: true },
-    { label: 'Round of 32', pts: '+5 pts', desc: 'Team advances to knockout stage' },
-    { label: 'Round of 16', pts: '+8 pts', desc: 'Team advances to round of 16' },
-    { label: 'Quarter-final', pts: '+12 pts', desc: 'Team reaches quarter-final' },
-    { label: 'Semi-final', pts: '+20 pts', desc: 'Team reaches semi-final' },
-    { label: 'Runner-up', pts: '+30 pts', desc: 'Team reaches the final' },
-    { label: 'Champion', pts: '+40 pts', desc: 'Team wins the World Cup' },
+    { label: 'Round of 32', pts: '+3 pts', desc: 'Team advances to knockout stage' },
+    { label: 'Round of 16', pts: '+5 pts', desc: 'Team advances to round of 16' },
+    { label: 'Quarter-final', pts: '+8 pts', desc: 'Team reaches quarter-final' },
+    { label: 'Semi-final', pts: '+12 pts', desc: 'Team reaches semi-final' },
+    { label: 'Final', pts: '+18 pts', desc: 'Team reaches the final' },
+    { label: 'Champion', pts: '+25 pts', desc: 'Team wins the World Cup' },
   ]
 
   return (

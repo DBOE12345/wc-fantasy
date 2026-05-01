@@ -2,7 +2,7 @@ import { TEAMS, SCORING } from './teams.js'
 
 function rnd() { return Math.random() }
 
-function playMatch(sa, sb) {
+function playMatch(sa, sb, knockout = false) {
   const w = Math.min(0.85, Math.max(0.15, 0.42 + (sa - sb) / 140))
   let ag = Math.max(0, Math.round(rnd() * 2.5))
   let bg = Math.max(0, Math.round(rnd() * 2.5))
@@ -10,20 +10,28 @@ function playMatch(sa, sb) {
   if (r < w) { if (ag <= bg) ag = bg + 1 }
   else if (r < w + 0.22) { bg = ag }
   else { if (bg <= ag) bg = ag + 1 }
-  return [ag, bg]
+
+  let penWinner = null
+  if (knockout && ag === bg) {
+    penWinner = rnd() < w ? 'a' : 'b'
+  }
+
+  return { ag, bg, penWinner }
 }
 
 export function simulateBracket() {
-  const shuffled = TEAMS.slice().sort(() => rnd() - 0.5)
   const groups = []
-  for (let g = 0; g < 12; g++) groups.push(shuffled.slice(g * 4, g * 4 + 4))
+  for (let g = 0; g < 12; g++) {
+    const groupTeams = TEAMS.filter(t => t.g === String.fromCharCode(65 + g))
+    groups.push(groupTeams)
+  }
 
   const top2 = [], thirds = []
   groups.forEach(grp => {
     const rows = grp.map(t => ({ t, gpts: 0, gd: 0, gf: 0 }))
     for (let i = 0; i < 4; i++) {
       for (let j = i + 1; j < 4; j++) {
-        const [ag, bg] = playMatch(rows[i].t.s, rows[j].t.s)
+        const { ag, bg } = playMatch(rows[i].t.s, rows[j].t.s, false)
         rows[i].gd += ag - bg; rows[j].gd += bg - ag
         rows[i].gf += ag; rows[j].gf += bg
         if (ag > bg) rows[i].gpts += 3
@@ -40,40 +48,56 @@ export function simulateBracket() {
   const r32teams = [...top2, ...thirds.slice(0, 8).map(r => r.t)]
 
   function ko(teams) {
-    const matches = [], winners = []
+    const matches = [], winners = [], losers = []
     for (let i = 0; i + 1 < teams.length; i += 2) {
       const a = teams[i], b = teams[i + 1]
-      const [ag, bg] = playMatch(a.s, b.s)
-      const w = ag >= bg ? a : b
-      matches.push({ a, b, ag, bg, w })
+      const { ag, bg, penWinner } = playMatch(a.s, b.s, true)
+      const w = ag > bg ? a : bg > ag ? b : penWinner === 'a' ? a : b
+      const l = w === a ? b : a
+      matches.push({ a, b, ag, bg, penWinner, w })
       winners.push(w)
+      losers.push(l)
     }
-    return { matches, winners }
+    return { matches, winners, losers }
   }
 
   const rd32 = ko(r32teams)
   const rd16 = ko(rd32.winners)
   const rdqf = ko(rd16.winners)
   const rdsf = ko(rdqf.winners)
+  const third = ko(rdsf.losers)
   const rdfin = ko(rdsf.winners)
   const champ = rdfin.winners[0]
+  const ruTeam = rdfin.losers[0]
 
-  // Build stageBonus map
+  // stageBonus = CUMULATIVE additional points per round advanced
+  // Everyone who participates in a round gets that round's points
   const stageBonus = {}
-  r32teams.forEach(t => { stageBonus[t.n] = (stageBonus[t.n] || 0) + SCORING.r32 })
-  rd16.winners.forEach(t => { stageBonus[t.n] = (stageBonus[t.n] || 0) + SCORING.r16 })
-  rdqf.winners.forEach(t => { stageBonus[t.n] = (stageBonus[t.n] || 0) + SCORING.qf })
-  rdsf.winners.forEach(t => { stageBonus[t.n] = (stageBonus[t.n] || 0) + SCORING.sf })
-  rdfin.winners.forEach(t => { stageBonus[t.n] = (stageBonus[t.n] || 0) + SCORING.ru })
-  if (champ) stageBonus[champ.n] = (stageBonus[champ.n] || 0) + (SCORING.ch - SCORING.ru)
+  const add = (t, pts) => { stageBonus[t.n] = (stageBonus[t.n] || 0) + pts }
+
+  // Give points to ALL participants at each round (both winners and losers)
+  // because reaching a round earns points regardless of whether you win it
+  r32teams.forEach(t => add(t, SCORING.r32))
+  // R16 participants = R32 winners
+  rd32.winners.forEach(t => add(t, SCORING.r16))
+  // QF participants = R16 winners
+  rd16.winners.forEach(t => add(t, SCORING.qf))
+  // SF participants = QF winners (both who win and lose the SF)
+  rdqf.winners.forEach(t => add(t, SCORING.sf))
+  // Final participants = SF winners (both who win and lose the Final)
+  rdsf.winners.forEach(t => add(t, SCORING.ru))
+  // Champion gets extra ch points on top of ru
+  if (champ) add(champ, SCORING.ch)
 
   return {
     r32: rd32.matches,
     r16: rd16.matches,
     qf: rdqf.matches,
     sf: rdsf.matches,
+    third: third.matches,
     final: rdfin.matches,
     champ,
+    ruTeam,
     stageBonus,
   }
 }

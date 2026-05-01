@@ -1,0 +1,43 @@
+[33ma3389da[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Fix draft - use picksOrdered.length for turn calculation
+[33m061c572[m Fix draft - remove stale state reset, fix async real-time handler
+[33m6f2a5f5[m Fix draft - remove stale state check, clean makePick, no polling
+[33m238a1a0[m Fix draft - remove stale state check that was resetting draft on first pick
+[33m9299f05[m Fix draft - stop load() from resetting draft_pos during active draft
+[33mf738228[m Fix draft - canPick uses draftPosRef so teams become untappable instantly
+[33m008cdb3[m Fix draft - pickingRef stays locked until DB advances, prevents all double picks
+[33m22e856e[m Fix auto-pick - player picks for self, fallback for offline players
+[33mc32aafc[m Fix draft turn - update local draft_pos immediately after pick
+[33m21dc77a[m Fix player names, draft rotation, all real-time sync
+[33mda2145e[m Fix restart flash, reverse pick timer reset, clean state updates
+[33mcb3c448[m Fix draft turn rotation, mySlot null guard, restart draft fully resets
+[33mbe51c2b[m Fix real-time - stable subscriptions, navigate ref, all tables in publication
+[33m34e3ec2[m Fix schedule countdown, auto-switch to draft tab, draft start sync
+[33md067ff0[m Fix draft timer sync - server timestamp so all players see same countdown
+[33m04a6b69[m RLS security, privacy policy, draft sync, YOUR TURN banner, chat delete, auth fixes
+[33m5e6183e[m Dubber tiers/badges, referral upgrades, team breakdown, OTP, scoring fix
+[33m70fcc28[m Full overhaul - referrals, live scores, draft order, push notifications, league history, UI polish
+[33maf8c983[m Full UI overhaul - profile header, bracket fix, logos, mobile polish, all bugs fixed
+[33mb455308[m Fix profile photo RLS, real-time draft sync, reverse pick, restart draft
+[33m2605ac0[m Fix all mobile padding, safe areas, all tabs and pages
+[33m7a5b1d7[m Fix draft status, bigger logos, password reset, profile photo fix
+[33m2d35874[m Draft fix, profile, how to play, terms, commissioner controls, bigger logos
+[33m25d70ce[m Fix logos transparency, bigger headers, sounds, auto-pick, clock
+[33m463317f[m Fix logo blend, sounds, clock, tagline, auto-start
+[33md2b20dd[m Final release - logos, sounds, auto-start draft, bracket highlights
+[33m2d35a88[m DubUp final release - real logos, all fixes, bottom nav
+[33m034d4a9[m DubUp complete - welcome screen, bottom nav, draft fixes, full brand
+[33mfb8ab10[m FantasyDub rebrand, mobile fixes, My Teams dropdown, all draft fixes
+[33m3d794f4[m Fix all bugs + chat, sounds, notifications, countdown, player modal
+[33mf6b7dcc[m Fix popup, sounds, green highlights, player modal, bracket reset
+[33mcd6cbeb[m Sound effects, player detail modal, draft complete popup, pick fixes
+[33mc5c108b[m Add last pick display, all player picks visible, timer auto-pick fix
+[33mbcbaf4a[m Fix members loading for draft
+[33m6604c34[m Rebuild draft turn system from scratch
+[33m990d01d[m Fix draft turn rotation - fetch fresh draft_pos
+[33m42c491f[m Fix timer only runs on my turn
+[33mbdc6730[m Fix draft - never auto-pick for real players
+[33m0d04157[m Fix duplicate draft slots when joining league
+[33mc0695a4[m Working LeaguePage build
+[33mf30aa08[m Fix missing closing brace
+[33mad2cbe4[m stop tracking node_modules
+[33ma01f780[m Clean start

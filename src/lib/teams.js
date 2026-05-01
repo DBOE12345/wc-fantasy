@@ -67,11 +67,11 @@ export const SCORING = {
   win: 5, draw: 2, loss: 0,
   goal: 1, goalBonus: 2, cleanSheet: 3,
   redCard: -2, ownGoal: -1,
-  r32: 5, r16: 8, qf: 12, sf: 20, ru: 30, ch: 40,
+  r32: 3, r16: 5, qf: 8, sf: 12, ru: 18, ch: 25,
 }
 
 export const STAGE_LABELS = {
   r32: 'Round of 32', r16: 'Round of 16',
   qf: 'Quarter-final', sf: 'Semi-final',
-  ru: 'Runner-up', ch: 'Champion',
+  ru: 'Final', ch: 'Champion',
 }
