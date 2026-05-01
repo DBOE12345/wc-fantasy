@@ -181,6 +181,7 @@ export default function LeaguePage() {
   const [scheduledTime, setScheduledTime] = useState('')
   const [savingSchedule, setSavingSchedule] = useState(false)
   const timerRef = useRef(null)
+  const tickIntervalRef = useRef(null) // ticking sound interval - must be cleared when draft ends
   const pickingRef = useRef(false) // prevents double picks
 
   const mySlotRef = useRef(null)
@@ -394,6 +395,15 @@ export default function LeaguePage() {
       }
     })
 
+    // PROFILES UPDATE - refresh referral count live
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}`
+    }, (payload) => {
+      if (payload.new) {
+        setMyProfile(prev => ({ ...prev, ...payload.new }))
+      }
+    })
+
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         console.log('✅ Realtime connected')
@@ -461,9 +471,16 @@ export default function LeaguePage() {
 
   // Timer - synced to server timestamp so all clients show same countdown
   useEffect(() => {
+    // Always clear existing intervals first
     if (timerRef.current) clearInterval(timerRef.current)
+    if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null }
 
-    if (!draftStarted) {
+    // Stop timer if draft not started or draft done
+    const draftPos = league?.draft_pos || 0
+    const leagueSize = league?.size || 4
+    const draftDoneNow = draftPos >= (48 / leagueSize) * leagueSize || Object.keys(picks).length >= 48
+
+    if (!draftStarted || draftDoneNow) {
       setTimeLeft(PICK_TIMER)
       return
     }
@@ -480,22 +497,24 @@ export default function LeaguePage() {
     setTimeLeft(initialTime)
 
     // Send notification when it becomes my turn
-    const draftPos = league?.draft_pos || 0
-    const leagueSize = league?.size || 4
     const whoseTurn = getTurn(draftPos, leagueSize)
-    const draftDoneNow = draftPos >= (48 / leagueSize) * leagueSize || Object.keys(picks).length >= 48
     const isMyTurnNow = !draftDoneNow && whoseTurn === mySlot
     if (isMyTurnNow) sendPickNotification()
 
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev === 10) {
-          // Start ticking sound at 10 seconds
+          // Start ticking sound at 10 seconds - store ref so we can clear it
           try {
             const ctx = getAudioCtx()
             let tickCount = 0
-            const tickInterval = setInterval(() => {
-              if (tickCount >= 9) { clearInterval(tickInterval); return }
+            if (tickIntervalRef.current) clearInterval(tickIntervalRef.current)
+            tickIntervalRef.current = setInterval(() => {
+              if (tickCount >= 9) {
+                clearInterval(tickIntervalRef.current)
+                tickIntervalRef.current = null
+                return
+              }
               const osc = ctx.createOscillator()
               const gain = ctx.createGain()
               osc.connect(gain); gain.connect(ctx.destination)
@@ -510,6 +529,7 @@ export default function LeaguePage() {
         }
         if (prev <= 1) {
           clearInterval(timerRef.current)
+          if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null }
           // Timer expired — only pick for MYSELF if it's my turn
           // Double-check server time to prevent premature auto-picks
           setTimeout(async () => {
@@ -564,8 +584,11 @@ export default function LeaguePage() {
         return prev - 1
       })
     }, 1000)
-    return () => clearInterval(timerRef.current)
-  }, [league?.pick_started_at, draftStarted, mySlot, league?.size])
+    return () => {
+      clearInterval(timerRef.current)
+      if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null }
+    }
+  }, [league?.pick_started_at, draftStarted, mySlot, league?.size, league?.draft_pos])
 
   async function makePick(teamName) {
     if (!draftStarted) return
@@ -939,8 +962,26 @@ export default function LeaguePage() {
 
   function computePoints() {
     const stageBonus = bracket?.stageBonus || {}
+    const simData = bracket?.simData
+
     return members.map(m => {
       const mPicks = Object.entries(picks).filter(([, uid]) => uid === m.user_id).map(([t]) => t)
+
+      // If simulation has been run, use pre-computed results from DB
+      // This ensures ALL players see the same correct breakdown, not just commissioner
+      if (simData?.results) {
+        const simResult = simData.results.find(r => r.user_id === m.user_id)
+        if (simResult) {
+          return {
+            ...m,
+            computedPts: simResult.simPts || 0,
+            breakdown: simResult.breakdown || {},
+            teamPicks: simResult.simPicks || mPicks
+          }
+        }
+      }
+
+      // Fallback: compute from fixtures (for live WC scoring)
       const { total, breakdown } = calcTotalPoints(fixtures, mPicks, stageBonus)
       return { ...m, computedPts: total, breakdown, teamPicks: mPicks }
     }).sort((a, b) => b.computedPts - a.computedPts)

@@ -34,14 +34,6 @@ export default function AuthPage() {
         const { error, data } = await signUp(email, password, { data: { username: username.trim() } })
         if (error) { setError(error.message) }
         else {
-          // Track referral
-          if (refCode && data?.user) {
-            const { data: referrer } = await supabase
-              .from('profiles').select('id, referral_count').eq('referral_code', refCode.toUpperCase()).single()
-            if (referrer) {
-              await supabase.from('profiles').update({ referral_count: (referrer.referral_count || 0) + 1 }).eq('id', referrer.id)
-            }
-          }
           setPendingEmail(email)
           setOtpSent(true)
         }
@@ -54,7 +46,7 @@ export default function AuthPage() {
   async function verifyOtp() {
     if (!otpCode || otpCode.length < 6) { setError('Enter the 6-digit code from your email'); return }
     setLoading(true); setError('')
-    const { error } = await supabase.auth.verifyOtp({
+    const { error, data } = await supabase.auth.verifyOtp({
       email: pendingEmail,
       token: otpCode,
       type: 'signup',
@@ -62,6 +54,35 @@ export default function AuthPage() {
     setLoading(false)
     if (error) setError(error.message)
     else {
+      // After OTP verified, user and profile now exist
+      // Process referral now that profile is confirmed
+      if (refCode && data?.user) {
+        try {
+          // Find referrer by code
+          const { data: referrer } = await supabase
+            .from('profiles').select('id, referral_count').eq('referral_code', refCode.toUpperCase()).single()
+          if (referrer) {
+            // Increment referrer's count
+            await supabase.from('profiles')
+              .update({ referral_count: (referrer.referral_count || 0) + 1 })
+              .eq('id', referrer.id)
+          }
+        } catch(e) {}
+      }
+
+      // Generate referral_code for the new user if they don't have one
+      if (data?.user) {
+        try {
+          const { data: newProfile } = await supabase
+            .from('profiles').select('referral_code, username').eq('id', data.user.id).single()
+          if (!newProfile?.referral_code) {
+            const base = (newProfile?.username || pendingEmail.split('@')[0]).slice(0, 6).toUpperCase().replace(/[^A-Z0-9]/g, '')
+            const code = base + Math.floor(Math.random() * 999).toString().padStart(2, '0')
+            await supabase.from('profiles').update({ referral_code: code }).eq('id', data.user.id)
+          }
+        } catch(e) {}
+      }
+
       setOtpSent(false)
       setSuccess('Email verified! You can now sign in.')
       setMode('login')
