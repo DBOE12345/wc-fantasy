@@ -35,7 +35,7 @@ const AV_BG = ['#1a3a2a','#1a2a3a','#3a2a1a','#2a1a3a','#3a1a1a','#1a3a3a','#2a3
 const AV_FG = ['#5DCAA5','#85B7EB','#FAC775','#AFA9EC','#F09595','#5DCAA5','#C0DD97','#FAC775']
 const BAR_C = ['#1D9E75','#378ADD','#EF9F27','#D85A30','#7F77DD','#639922','#D4537E','#888780']
 const STAGE_CSS = {
-  'Champion':'stage-ch','Runner-up':'stage-ru','Semi-final':'stage-sf',
+  'Champion':'stage-ch','Final':'stage-ru','Semi-final':'stage-sf',
   'Quarter-final':'stage-qf','Round of 16':'stage-r16','Round of 32':'stage-r32','Group stage':'stage-gs'
 }
 const PICK_TIMER = 60
@@ -51,6 +51,7 @@ function getAudioCtx() {
 function playSound(type) {
   try {
     const ctx = getAudioCtx()
+    if (ctx.state === 'suspended') { ctx.resume().catch(() => {}) }
 
     if (type === 'draft_start') {
       // Stadium horn + crowd build up
@@ -153,7 +154,7 @@ export default function LeaguePage() {
   const [league, setLeague] = useState(null)
   const [members, setMembers] = useState([])
   const [picks, setPicks] = useState({})
-  const [mySlot, setMySlot] = useState(0)
+  const [mySlot, setMySlot] = useState(null) // null = not loaded yet
   const [bracket, setBracket] = useState(null)
   const [fixtures, setFixtures] = useState([])
   const [tab, setTab] = useState('league')
@@ -182,149 +183,227 @@ export default function LeaguePage() {
   const timerRef = useRef(null)
   const pickingRef = useRef(false) // prevents double picks
 
+  const mySlotRef = useRef(null)
+  useEffect(() => { mySlotRef.current = mySlot }, [mySlot])
+  const draftPosRef = useRef(0) // tracks draft_pos synchronously
+  const navigateRef = useRef(navigate)
+  useEffect(() => { navigateRef.current = navigate }, [navigate])
+
   const load = useCallback(async () => {
     const { data: lg } = await supabase.from('leagues').select('*').eq('id', id).single()
-    if (!lg) { navigate('/'); return }
+    if (!lg) { navigateRef.current('/'); return }
     setLeague(lg)
+    draftPosRef.current = lg.draft_pos || 0
     if (lg.scheduled_at) setScheduledTime(lg.scheduled_at.slice(0, 16))
-    // draft_started will be set after we load picks below
 
-    // Fetch members without profiles join first (more reliable)
-    const { data: mems, error: memsError } = await supabase
+    // Load members first
+    const { data: mems } = await supabase
       .from('league_members')
       .select('*')
       .eq('league_id', id)
       .order('draft_slot')
-    
-    if (memsError) console.error('Members error:', memsError)
-    
-    // Try to get profiles separately
-    const memsWithProfiles = await Promise.all((mems || []).map(async m => {
-      const { data: profile } = await supabase
-        .from('profiles').select('username, email, avatar_url, referral_count').eq('id', m.user_id).single()
-      return { ...m, profile: profile || null }
-    }))
-    
-    setMembers(memsWithProfiles)
-    const me = memsWithProfiles.find(m => m.user_id === user.id)
-    const myDraftSlot = me?.draft_slot ?? null
-    if (myDraftSlot !== null) setMySlot(myDraftSlot)
-    console.log('My slot:', myDraftSlot, 'All members:', memsWithProfiles.map(m => ({ slot: m.draft_slot, uid: m.user_id.slice(0,8) })))
 
+    // Load all profiles for these members in one query
+    const userIds = (mems || []).map(m => m.user_id)
+    const { data: profilesData } = userIds.length > 0
+      ? await supabase.from('profiles').select('id, username, email, avatar_url, referral_count').in('id', userIds)
+      : { data: [] }
+
+    // Map profiles to members
+    const profileMap = {}
+    ;(profilesData || []).forEach(p => { profileMap[p.id] = p })
+
+    const memsWithProfiles = (mems || []).map(m => ({
+      ...m,
+      profile: profileMap[m.user_id] || null
+    }))
+    setMembers(memsWithProfiles)
+
+    const me = memsWithProfiles.find(m => m.user_id === user.id)
+    if (me?.draft_slot != null) setMySlot(me.draft_slot)
+    // Load picks
     const { data: pickData } = await supabase
-      .from('picks').select('team_name, user_id, picked_at').eq('league_id', id).order('picked_at')
+      .from('picks').select('*').eq('league_id', id).order('picked_at')
     const pickMap = {}
     pickData?.forEach(p => { pickMap[p.team_name] = p.user_id })
     setPicks(pickMap)
     setPicksOrdered(pickData || [])
 
-    // Only treat draft as started if DB says so AND there are actual picks OR draft_pos > 0
-    const actuallyStarted = !!lg.draft_started && (lg.draft_pos > 0 || (pickData?.length || 0) > 0)
-    setDraftStarted(actuallyStarted)
-    // If DB says started but no picks exist, clean up the stale state
-    if (!!lg.draft_started && !actuallyStarted) {
-      await supabase.from('leagues').update({ draft_started: false, draft_pos: 0 }).eq('id', lg.id)
-    }
+    // Set draft started state - trust the DB value
+    setDraftStarted(!!lg.draft_started)
 
-    if (lg.bracket_data) setBracket(JSON.parse(lg.bracket_data))
-    else if (Object.keys(pickMap).length >= 48) {
+    // If draft is already complete when loading, mark prevDraftDoneRef so popup never shows
+    const alreadyDone = (lg.draft_pos || 0) >= snakeOrder(lg.size || 4, 48).length || (pickData?.length || 0) >= 48
+    if (alreadyDone) prevDraftDoneRef.current = true
+
+    // Bracket
+    if (lg.bracket_data) {
+      try { setBracket(JSON.parse(lg.bracket_data)) } catch(e) {}
+    } else if (pickData?.length >= 48) {
       const b = simulateBracket()
       setBracket(b)
       await supabase.from('leagues').update({ bracket_data: JSON.stringify(b) }).eq('id', id)
     }
-    // Load chat messages
+
+    // Chat
     const { data: msgs } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('league_id', id)
-      .order('created_at')
-      .limit(50)
+      .from('chat_messages').select('*').eq('league_id', id).order('created_at').limit(50)
     setChatMessages(msgs || [])
 
-    // Load my profile for avatar
-    const { data: profileData } = await supabase.from('profiles').select('username, avatar_url, referral_count').eq('id', user.id).single()
+    // My profile
+    const { data: profileData } = await supabase
+      .from('profiles').select('username, avatar_url, referral_count').eq('id', user.id).single()
     if (profileData) setMyProfile(profileData)
 
-    // Load real match fixtures (goes live June 11 2026)
-    const wcStart = new Date('2026-06-11T00:00:00Z')
-    if (new Date() >= wcStart) {
-      try {
-        const fixtureData = await fetchFixtures()
-        setFixtures(fixtureData)
-      } catch(e) {
-        console.error('Could not load fixtures:', e)
-      }
+    // Fixtures after WC starts
+    if (new Date() >= new Date('2026-06-11T00:00:00Z')) {
+      try { const f = await fetchFixtures(); setFixtures(f) } catch(e) {}
     }
 
     setLoading(false)
-  }, [id, user.id, navigate])
+  }, [id, user.id])
 
   useEffect(() => {
     load()
-    const channel = supabase.channel(`league_${id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, (payload) => {
-        const newPick = payload.new
-        if (newPick) {
-          setPicks(prev => ({ ...prev, [newPick.team_name]: newPick.user_id }))
-          setPicksOrdered(prev => [...prev, newPick])
-          setTimeLeft(PICK_TIMER)
-        }
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'picks', filter: `league_id=eq.${id}` }, (payload) => {
-        // Pick was reversed — remove from local state AND reload to ensure full sync on all devices
-        const deleted = payload.old
-        if (deleted?.team_name) {
-          setPicks(prev => {
-            const next = { ...prev }
-            delete next[deleted.team_name]
-            return next
-          })
-          setPicksOrdered(prev => prev.filter(p => p.team_name !== deleted.team_name))
-        }
-        // Full reload ensures phone and all other clients are in sync
-        load()
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}` }, (payload) => {
-        const updated = payload.new
-        if (!updated) return
-        setLeague(updated)
-        const nowStarted = !!updated.draft_started
-        const wasReset = !updated.draft_started && updated.draft_pos === 0
 
-        setDraftStarted(prev => {
-          // Play sound when draft transitions false → true
-          if (!prev && nowStarted && !didStartRef.current) {
-            try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
-          }
-          return nowStarted
-        })
+    const channel = supabase.channel(`league_${id}`, {
+      config: { broadcast: { self: true } }
+    })
 
-        if (wasReset) {
-          // Draft was restarted — clear everything and reload
-          setPicks({})
-          setPicksOrdered([])
-          setBracket(null)
-          setTimeLeft(PICK_TIMER)
-          load() // full reload to sync picks too
-        } else if (updated.bracket_data) {
-          try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+    // PICKS - INSERT: new pick made by anyone
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'picks', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      const newPick = payload.new
+      if (!newPick) return
+      setPicks(prev => ({ ...prev, [newPick.team_name]: newPick.user_id }))
+      setPicksOrdered(prev => {
+        if (prev.some(p => p.team_name === newPick.team_name)) return prev
+        return [...prev, newPick]
+      })
+      playSound('pick')
+    })
+
+    // PICKS - DELETE: pick reversed
+    .on('postgres_changes', {
+      event: 'DELETE', schema: 'public', table: 'picks', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      const deleted = payload.old
+      if (deleted?.team_name) {
+        setPicks(prev => { const n = { ...prev }; delete n[deleted.team_name]; return n })
+        setPicksOrdered(prev => prev.filter(p => p.team_name !== deleted.team_name))
+      }
+    })
+
+    // LEAGUE - UPDATE
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}`
+    }, (payload) => {
+      // Use payload.new directly - it contains the committed values
+      const updated = payload.new
+      if (!updated || !updated.id) return
+
+      setLeague(prev => ({ ...prev, ...updated }))
+      draftPosRef.current = updated.draft_pos || 0
+
+      const nowStarted = !!updated.draft_started
+      const wasReset = !updated.draft_started && updated.draft_pos === 0
+
+      if (wasReset) {
+        setPicks({})
+        setPicksOrdered([])
+        setBracket(null)
+        setDraftStarted(false)
+        setDraftComplete(false)
+        setTimeLeft(PICK_TIMER)
+        setScheduledTime('')
+        setTab('league')
+        return
+      }
+
+      setDraftStarted(prev => {
+        if (!prev && nowStarted && !didStartRef.current) {
+          try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
+          setTimeout(() => setTab('draft'), 500)
         }
+        return nowStarted
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}` }, () => {
-        // Draft order changed — reload all members to sync draft slots for everyone
-        load()
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}` }, (payload) => {
-        if (payload.new) setChatMessages(prev => [...prev, payload.new])
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}` }, () => {
-        // Chat cleared — reload messages
-        supabase.from('chat_messages').select('*').eq('league_id', id).order('created_at').then(({ data }) => {
-          setChatMessages(data || [])
+
+      if (updated.bracket_data) {
+        try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+      }
+    })
+
+    // LEAGUE_MEMBERS - INSERT: new player joined
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}`
+    }, () => {
+      // Reload members only - don't call full load() which can reset draft_pos
+      supabase
+        .from('league_members').select('*').eq('league_id', id).order('draft_slot')
+        .then(async ({ data: mems }) => {
+          if (!mems) return
+          const userIds = mems.map(m => m.user_id)
+          const { data: profilesData } = await supabase
+            .from('profiles').select('id, username, email, avatar_url, referral_count').in('id', userIds)
+          const profileMap = {}
+          ;(profilesData || []).forEach(p => { profileMap[p.id] = p })
+          const memsWithProfiles = mems.map(m => ({ ...m, profile: profileMap[m.user_id] || null }))
+          setMembers(memsWithProfiles)
         })
+    })
+
+    // LEAGUE_MEMBERS - UPDATE: draft order changed
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}`
+    }, () => {
+      // Reload members only - don't call full load() which can reset draft_pos
+      supabase
+        .from('league_members').select('*').eq('league_id', id).order('draft_slot')
+        .then(async ({ data: mems }) => {
+          if (!mems) return
+          const userIds = mems.map(m => m.user_id)
+          const { data: profilesData } = await supabase
+            .from('profiles').select('id, username, email, avatar_url, referral_count').in('id', userIds)
+          const profileMap = {}
+          ;(profilesData || []).forEach(p => { profileMap[p.id] = p })
+          const memsWithProfiles = mems.map(m => ({ ...m, profile: profileMap[m.user_id] || null }))
+          setMembers(memsWithProfiles)
+        })
+    })
+
+    // CHAT - INSERT
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      if (payload.new) setChatMessages(prev => {
+        if (prev.some(m => m.id === payload.new.id)) return prev
+        return [...prev, payload.new]
       })
-      .subscribe()
-    return () => supabase.removeChannel(channel)
+    })
+
+    // CHAT - DELETE
+    .on('postgres_changes', {
+      event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `league_id=eq.${id}`
+    }, (payload) => {
+      if (payload.old?.id) {
+        setChatMessages(prev => prev.filter(m => m.id !== payload.old.id))
+      } else {
+        setChatMessages([])
+      }
+    })
+
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('✅ Realtime connected')
+      } else {
+        console.log('Realtime status:', status)
+      }
+    })
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [load, id])
 
   // Draft countdown timer + auto-start
@@ -334,7 +413,6 @@ export default function LeaguePage() {
       const diff = new Date(league.scheduled_at) - new Date()
       if (diff <= 0) {
         setCountdown(null)
-        // Auto-start the draft!
         if (!draftStarted) {
           await supabase.from('leagues').update({
             draft_started: true,
@@ -343,6 +421,8 @@ export default function LeaguePage() {
           }).eq('id', id)
           setDraftStarted(true)
           didStartRef.current = true
+          // Switch everyone to the draft tab automatically
+          setTab('draft')
           try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 100) } catch(e) {}
         }
         return
@@ -357,6 +437,22 @@ export default function LeaguePage() {
     return () => clearInterval(t)
   }, [league?.scheduled_at, draftStarted, id])
 
+  // When player returns to tab/app, resync timer from server timestamp
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible' && draftStarted) {
+        // Force timer to recalculate from pick_started_at
+        if (timerRef.current) clearInterval(timerRef.current)
+        const pickStarted = league?.pick_started_at ? new Date(league.pick_started_at) : null
+        const elapsed = pickStarted ? Math.floor((Date.now() - pickStarted.getTime()) / 1000) : 0
+        const remaining = Math.max(1, PICK_TIMER - elapsed)
+        setTimeLeft(remaining)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [draftStarted, league?.pick_started_at])
+
   // Scroll chat to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -365,24 +461,29 @@ export default function LeaguePage() {
   // Timer - synced to server timestamp so all clients show same countdown
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current)
-    const draftPos = league?.draft_pos || 0
-    const leagueSize = league?.size || 4
-    const whoseTurn = getTurn(draftPos, leagueSize)
-    const draftDoneNow = draftPos >= (48 / leagueSize) * leagueSize || Object.keys(picks).length >= 48
-    const isMyTurnNow = draftStarted && !draftDoneNow && whoseTurn === mySlot
 
-    if (!draftStarted || draftDoneNow) {
+    if (!draftStarted) {
       setTimeLeft(PICK_TIMER)
       return
     }
 
-    // Calculate initial time from server timestamp if available
+    // Calculate time from server timestamp - this is the single source of truth
     const pickStarted = league?.pick_started_at ? new Date(league.pick_started_at) : null
-    const elapsed = pickStarted ? Math.floor((Date.now() - pickStarted.getTime()) / 1000) : 0
+    if (!pickStarted) {
+      setTimeLeft(PICK_TIMER)
+      return
+    }
+
+    const elapsed = Math.floor((Date.now() - pickStarted.getTime()) / 1000)
     const initialTime = Math.max(1, PICK_TIMER - elapsed)
     setTimeLeft(initialTime)
 
     // Send notification when it becomes my turn
+    const draftPos = league?.draft_pos || 0
+    const leagueSize = league?.size || 4
+    const whoseTurn = getTurn(draftPos, leagueSize)
+    const draftDoneNow = draftPos >= (48 / leagueSize) * leagueSize || Object.keys(picks).length >= 48
+    const isMyTurnNow = !draftDoneNow && whoseTurn === mySlot
     if (isMyTurnNow) sendPickNotification()
 
     timerRef.current = setInterval(() => {
@@ -408,27 +509,28 @@ export default function LeaguePage() {
         }
         if (prev <= 1) {
           clearInterval(timerRef.current)
-          // Time ran out — auto pick for whoever's turn it is (works even if they're not on draft tab)
+          // Timer expired — only pick for MYSELF if it's my turn
+          // Double-check server time to prevent premature auto-picks
           setTimeout(async () => {
             const { data: freshLeague } = await supabase
-              .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
+              .from('leagues').select('draft_pos, size, draft_started, pick_started_at').eq('id', id).single()
             if (!freshLeague?.draft_started) return
-            const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
-            // Find the member whose turn it is
-            const { data: members2 } = await supabase
-              .from('league_members').select('user_id, draft_slot').eq('league_id', id)
-            const turnMember = members2?.find(m => m.draft_slot === whoseTurn)
-            // Only the first player alphabetically triggers auto-pick to avoid duplicates
-            // Use the logged-in user only if it's their slot, OR if no one else will do it (slot 0 always fires as fallback)
-            if (whoseTurn !== mySlot && mySlot !== 0) return
-            if (whoseTurn !== mySlot && mySlot === 0) {
-              // I'm slot 0 acting as fallback — only fire if the real owner hasn't picked
-              const { data: recentPick } = await supabase
-                .from('picks').select('picked_at').eq('league_id', id)
-                .order('picked_at', { ascending: false }).limit(1).single()
-              const lastPickTime = recentPick?.picked_at ? new Date(recentPick.picked_at) : null
-              if (lastPickTime && (new Date() - lastPickTime) < 58000) return // someone picked recently
+
+            // Verify timer actually expired server-side (not a local timing issue)
+            if (freshLeague.pick_started_at) {
+              const serverElapsed = Math.floor((Date.now() - new Date(freshLeague.pick_started_at).getTime()) / 1000)
+              if (serverElapsed < PICK_TIMER - 2) return // timer hasn't actually expired yet
             }
+
+            // Use actual pick count as source of truth - same as display logic
+            const { count: totalPicks } = await supabase
+              .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id)
+            const effectivePos = Math.max(freshLeague.draft_pos, totalPicks || 0)
+
+            // Only fire if it is actually MY turn right now
+            if (getTurn(effectivePos, freshLeague.size) !== mySlot) return
+
+            // Pick random available team for myself
             const { data: existingPicks } = await supabase
               .from('picks').select('team_name').eq('league_id', id)
             const takenNames = new Set(existingPicks?.map(p => p.team_name) || [])
@@ -436,20 +538,25 @@ export default function LeaguePage() {
             if (!available.length) return
             const auto = available[Math.floor(Math.random() * available.length)]
             const tpp = 48 / freshLeague.size
-            const pickUserId = turnMember?.user_id || user.id
-            const { count: theirCount } = await supabase
+            const { count: myCount } = await supabase
               .from('picks').select('id', { count: 'exact', head: true })
-              .eq('league_id', id).eq('user_id', pickUserId)
-            if ((theirCount || 0) >= tpp) return
+              .eq('league_id', id).eq('user_id', user.id)
+            if ((myCount || 0) >= tpp) return
+            if (pickingRef.current) return
+            pickingRef.current = true
             const { error } = await supabase.from('picks').insert({
-              league_id: id, user_id: pickUserId, team_name: auto.n
+              league_id: id, user_id: user.id, team_name: auto.n
             })
             if (!error) {
+              const newPos = effectivePos + 1
+              draftPosRef.current = newPos
+              setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
               await supabase.from('leagues').update({
-                draft_pos: freshLeague.draft_pos + 1,
+                draft_pos: newPos,
                 pick_started_at: new Date().toISOString()
               }).eq('id', id)
             }
+            pickingRef.current = false
           }, 100)
           return PICK_TIMER
         }
@@ -457,62 +564,62 @@ export default function LeaguePage() {
       })
     }, 1000)
     return () => clearInterval(timerRef.current)
-  }, [league?.draft_pos, league?.pick_started_at, draftStarted, mySlot, league?.size])
+  }, [league?.pick_started_at, draftStarted, mySlot, league?.size])
 
-  async function makePick(teamName, isAuto = false) {
+  async function makePick(teamName) {
     if (!draftStarted) return
+    if (mySlot === null) return
     if (pickingRef.current) return
     pickingRef.current = true
 
     try {
-      // Always fetch fresh state from DB
-      const { data: freshLeague } = await supabase
+      const { data: lg } = await supabase
         .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
-      if (!freshLeague || !freshLeague.draft_started) return
+      if (!lg?.draft_started) return
 
-      const tpp = 48 / freshLeague.size
-      const whoseTurn = getTurn(freshLeague.draft_pos, freshLeague.size)
+      // Use the higher of DB draft_pos or actual pick count
+      const effectivePos = Math.max(lg.draft_pos, picksOrdered.length)
+      const turn = getTurn(effectivePos, lg.size)
+      if (turn !== mySlot) return
 
-      // Only allow picking if it's this player's turn
-      if (whoseTurn !== mySlot) return
+      const tpp = 48 / lg.size
 
-      // Check team not already picked
-      const { count: existingCount } = await supabase
-        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('team_name', teamName)
-      if (existingCount && existingCount > 0) return
+      const { count: taken } = await supabase
+        .from('picks').select('id', { count: 'exact', head: true })
+        .eq('league_id', id).eq('team_name', teamName)
+      if (taken > 0) return
 
-      // Check player hasn't exceeded their allotment
       const { count: myCount } = await supabase
-        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id).eq('user_id', user.id)
-      if ((myCount || 0) >= tpp) return
+        .from('picks').select('id', { count: 'exact', head: true })
+        .eq('league_id', id).eq('user_id', user.id)
+      if (myCount >= tpp) return
 
-      // Insert pick
       const { error } = await supabase.from('picks').insert({
         league_id: id, user_id: user.id, team_name: teamName
       })
       if (error) return
 
+      const newPos = effectivePos + 1
+      draftPosRef.current = newPos
+      setPicks(prev => ({ ...prev, [teamName]: user.id }))
       setPicksOrdered(prev => [...prev, { team_name: teamName, user_id: user.id, picked_at: new Date().toISOString() }])
+      setLeague(prev => prev ? { ...prev, draft_pos: newPos, pick_started_at: new Date().toISOString() } : prev)
       playSound('pick')
 
-      // Advance draft by 1 AND record when this new turn started (for timer sync)
-      const newPos = freshLeague.draft_pos + 1
       await supabase.from('leagues').update({
         draft_pos: newPos,
         pick_started_at: new Date().toISOString()
       }).eq('id', id)
 
-      // Check if complete
-      const { count: totalCount } = await supabase
-        .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id)
-      if ((totalCount || 0) >= 48) { setDraftComplete(true); playSound('complete') }
+      if (newPos >= tpp * lg.size) {
+        setDraftComplete(true)
+        playSound('complete')
+      }
 
     } finally {
-      // ALWAYS release the lock no matter what
       pickingRef.current = false
     }
   }
-
   // Push notification registration
   async function registerPushNotifications() {
     if (!('Notification' in window)) return false
@@ -614,15 +721,16 @@ export default function LeaguePage() {
   async function saveSchedule() {
     if (!scheduledTime) return
     const localDate = new Date(scheduledTime)
-    // Validate it's in the future
     if (localDate <= new Date()) {
-      alert('Invalid date/time — please enter a future time.')
+      alert('Please choose a future date and time.')
       return
     }
     setSavingSchedule(true)
-    await supabase.from('leagues').update({ scheduled_at: localDate.toISOString() }).eq('id', id)
+    const isoTime = localDate.toISOString()
+    await supabase.from('leagues').update({ scheduled_at: isoTime }).eq('id', id)
+    // Update local league state so countdown starts immediately without refresh
+    setLeague(prev => ({ ...prev, scheduled_at: isoTime }))
     setSavingSchedule(false)
-    alert('Draft time saved! ' + localDate.toLocaleString())
   }
 
   async function sendChat() {
@@ -640,6 +748,177 @@ export default function LeaguePage() {
     setSendingChat(false)
   }
 
+
+  // =============================================
+  // TOURNAMENT SIMULATION (Commissioner only)
+  // Tests all point calculations with fake match data
+  // =============================================
+  const [simRunning, setSimRunning] = useState(false)
+  const [simResults, setSimResults] = useState(null)
+
+  async function simulateTournament() {
+    setSimRunning(true)
+    setSimResults(null)
+
+    try {
+      // Step 1: Simulate full bracket
+      const bracket = simulateBracket()
+
+      // Step 2: Generate fake fixtures for ALL matches
+      // Group stage: 12 groups x 6 matches = 72 matches
+      // Knockout: 32 + 16 + 8 + 4 + 2 + 1 = 63... actually 32+16+8+4+2+1 = no
+      // R32=16 matches, R16=8, QF=4, SF=2, Final=1 = 31 matches
+      // Total: 72 + 31 = 103 matches + 3rd place = 104
+      const fakeFixtures = []
+      let fixtureId = 1
+
+      function makeFixture(homeTeam, awayTeam, homeGoals, awayGoals, round, stage, redCards = [], ownGoals = []) {
+        const homeId = TEAMS.find(t => t.n === homeTeam.n)?.apiId || fixtureId * 10
+        const awayId = TEAMS.find(t => t.n === awayTeam.n)?.apiId || fixtureId * 10 + 1
+        const events = []
+        // Add red card events
+        redCards.forEach(team => {
+          const tId = team === homeTeam.n ? homeId : awayId
+          events.push({ team: { id: tId }, detail: 'Red Card', type: 'Card' })
+        })
+        // Add own goal events
+        ownGoals.forEach(team => {
+          const tId = team === homeTeam.n ? homeId : awayId
+          events.push({ team: { id: tId }, detail: 'Own Goal', type: 'Goal' })
+        })
+        return {
+          fixture: { id: fixtureId++, status: { short: 'FT' }, date: '2026-06-15T18:00:00+00:00' },
+          league: { round: round },
+          teams: {
+            home: { id: homeId, name: homeTeam.n },
+            away: { id: awayId, name: awayTeam.n }
+          },
+          goals: { home: homeGoals, away: awayGoals },
+          events,
+        }
+      }
+
+      // Generate group stage fixtures from bracket data
+      // We need to reconstruct group stage results
+      // Use the team strength scores to generate realistic group stage results
+      const shuffled = TEAMS.slice().sort((a, b) => b.s - a.s)
+      const groups = []
+      for (let g = 0; g < 12; g++) {
+        const groupTeams = TEAMS.filter(t => t.g === String.fromCharCode(65 + g))
+        groups.push(groupTeams)
+      }
+
+      // Generate group stage matches for all 12 groups
+      groups.forEach((grp, gi) => {
+        const groupLetter = String.fromCharCode(65 + gi)
+        for (let i = 0; i < grp.length; i++) {
+          for (let j = i + 1; j < grp.length; j++) {
+            const home = grp[i]
+            const away = grp[j]
+            const strengthDiff = (home.s - away.s) / 140
+            const homeWinProb = Math.min(0.75, Math.max(0.25, 0.45 + strengthDiff))
+            const r = Math.random()
+            let hg = Math.max(0, Math.round(Math.random() * 2.5))
+            let ag = Math.max(0, Math.round(Math.random() * 2.5))
+            if (r < homeWinProb) { if (hg <= ag) hg = ag + 1 }
+            else if (r < homeWinProb + 0.22) { ag = hg }
+            else { if (ag <= hg) ag = hg + 1 }
+            // Occasionally add red cards and own goals for testing
+            const redCards = Math.random() < 0.08 ? [Math.random() < 0.5 ? home.n : away.n] : []
+            const ownGoals = Math.random() < 0.05 ? [Math.random() < 0.5 ? home.n : away.n] : []
+            fakeFixtures.push(makeFixture(home, away, hg, ag, `Group ${groupLetter}`, 'group', redCards, ownGoals))
+          }
+        }
+      })
+
+      // Generate knockout stage fixtures from bracket
+      // In knockout, if teams are tied and there's a penWinner, 
+      // we use status 'PEN' so calcMatchPoints gives win to the advancing team
+      function makeKOFixture(m, round) {
+        if (!m.a || !m.b) return
+        const homeId = TEAMS.find(t => t.n === m.a.n)?.apiId || fixtureId * 10
+        const awayId = TEAMS.find(t => t.n === m.b.n)?.apiId || fixtureId * 10 + 1
+        // If pen winner, adjust goals so winner has 1 more (pens decided it)
+        // Actually for scoring: draw in regulation = 2pts each, pen win = counted as win
+        // We use status PEN and give winner +1 goal to signal win
+        let hg = m.ag, ag2 = m.bg
+        const isPen = m.penWinner !== null && m.penWinner !== undefined
+        if (isPen) {
+          // Keep regulation score equal but add +1 to winner's tally for scoring
+          if (m.penWinner === 'a') hg = m.ag + 1
+          else ag2 = m.bg + 1
+        }
+        fakeFixtures.push({
+          fixture: { id: fixtureId++, status: { short: isPen ? 'PEN' : 'FT' }, date: '2026-06-28T18:00:00+00:00' },
+          league: { round },
+          teams: {
+            home: { id: homeId, name: m.a.n },
+            away: { id: awayId, name: m.b.n }
+          },
+          goals: { home: hg, away: ag2 },
+          events: [],
+        })
+      }
+
+      const stages = [
+        { matches: bracket.r32, round: 'Round of 32' },
+        { matches: bracket.r16, round: 'Round of 16' },
+        { matches: bracket.qf, round: 'Quarter-finals' },
+        { matches: bracket.sf, round: 'Semi-finals' },
+        { matches: bracket.third, round: '3rd Place' },
+        { matches: bracket.final, round: 'Final' },
+      ]
+
+      stages.forEach(({ matches, round }) => {
+        if (!matches) return
+        matches.forEach(m => makeKOFixture(m, round))
+      })
+
+      // Step 3: Calculate points for all members
+      const results = members.map(m => {
+        const mPicks = Object.entries(picks).filter(([, uid]) => uid === m.user_id).map(([t]) => t)
+        const { total, breakdown } = calcTotalPoints(fakeFixtures, mPicks, bracket.stageBonus || {})
+        return {
+          ...m,
+          simPts: total,
+          simBreakdown: breakdown,
+          simPicks: mPicks,
+        }
+      }).sort((a, b) => b.simPts - a.simPts)
+
+      setSimResults({ results, bracket, fixtures: fakeFixtures })
+      setFixtures(fakeFixtures)
+
+      // Save bracket and sim results to DB so ALL players can see them
+      const simData = {
+        results: results.map(r => ({
+          user_id: r.user_id,
+          draft_slot: r.draft_slot,
+          simPts: r.simPts,
+          simPicks: r.simPicks,
+        })),
+        fixtureCount: fakeFixtures.length,
+        champ: bracket.champ?.n,
+        ruTeam: bracket.ruTeam?.n,
+      }
+      await supabase.from('leagues').update({
+        bracket_data: JSON.stringify({ ...bracket, simData })
+      }).eq('id', id)
+      setBracket({ ...bracket, simData })
+
+    } catch(e) {
+      alert('Simulation error: ' + e.message)
+    }
+    setSimRunning(false)
+  }
+
+  function clearSimulation() {
+    setSimResults(null)
+    setFixtures([])
+    setBracket(null)
+    supabase.from('leagues').update({ bracket_data: null }).eq('id', id)
+  }
+
   function copyCode() {
     navigator.clipboard.writeText(league?.code || '')
     setCopied(true)
@@ -648,9 +927,9 @@ export default function LeaguePage() {
 
   function getDisplayName(m) {
     if (!m) return 'TBD'
-    // Try username first, then email prefix, then generic player number
-    const name = m.profile?.username || m.profile?.email?.split('@')[0]
-    if (name && name.length > 2) return name
+    const p = m.profile
+    if (p?.username?.trim()) return p.username.trim()
+    if (p?.email) return p.email.split('@')[0]
     return `Player ${(m.draft_slot ?? 0) + 1}`
   }
 
@@ -663,22 +942,32 @@ export default function LeaguePage() {
     }).sort((a, b) => b.computedPts - a.computedPts)
   }
 
-  // Trigger draft complete popup - MUST be before any conditional returns
-  const prevDraftDoneRef = useRef(false)
+  // Trigger draft complete popup - only fires when draft JUST completed, not on page reload
+  const prevDraftDoneRef = useRef(null) // null = not yet initialized
   const draftDoneCalc = (league?.draft_pos || 0) >= snakeOrder(league?.size || 4, 48).length || Object.keys(picks).length >= 48
   useEffect(() => {
+    if (loading) return
+    if (prevDraftDoneRef.current === null) {
+      // First render after load - record state but NEVER show popup
+      prevDraftDoneRef.current = draftDoneCalc
+      return
+    }
+    // Only show popup if we transitioned from false → true during this session
     if (draftDoneCalc && !prevDraftDoneRef.current && draftStarted) {
       setDraftComplete(true)
       playSound('complete')
     }
     prevDraftDoneRef.current = draftDoneCalc
-  }, [draftDoneCalc, draftStarted])
+  }, [draftDoneCalc, draftStarted, loading])
 
   if (loading) return <div className="container page-wrap"><div className="empty">Loading league...</div></div>
 
   const tpp = 48 / (league?.size || 4)
   const order = snakeOrder(league?.size || 4, 48)
-  const draftPos = league?.draft_pos || 0
+  // Use picksOrdered.length as the source of truth for whose turn it is
+  // This is more reliable than league.draft_pos because picks INSERT
+  // real-time fires correctly on all devices
+  const draftPos = Math.max(league?.draft_pos || 0, picksOrdered.length)
   const currentTurn = order[draftPos]
   const isMyTurn = currentTurn === mySlot
   const draftDone = draftDoneCalc
@@ -717,7 +1006,7 @@ export default function LeaguePage() {
         const p = rankedMembers.find(m => m.id === selectedPlayer.id) || selectedPlayer
         const stageBonus = bracket?.stageBonus || {}
         const STAGE_CSS_MAP = {
-          'Champion':'stage-ch','Runner-up':'stage-ru','Semi-final':'stage-sf',
+          'Champion':'stage-ch','Final':'stage-ru','Semi-final':'stage-sf',
           'Quarter-final':'stage-qf','Round of 16':'stage-r16','Round of 32':'stage-r32','Group stage':'stage-gs'
         }
         return (
@@ -739,13 +1028,11 @@ export default function LeaguePage() {
                   let stageLabel = 'Group stage'
                   if (bracket) {
                     if (bracket.champ?.n === n) stageLabel = 'Champion'
-                    else {
-                      for (const {d, l} of [
-                        {d:bracket.final,l:'Runner-up'},{d:bracket.sf,l:'Semi-final'},
-                        {d:bracket.qf,l:'Quarter-final'},{d:bracket.r16,l:'Round of 16'},
-                        {d:bracket.r32,l:'Round of 32'}
-                      ]) { if (d?.some(m => m.w?.n === n)) { stageLabel = l; break } }
-                    }
+                    else if (bracket.final?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Final'
+                    else if (bracket.sf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Semi-final'
+                    else if (bracket.qf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Quarter-final'
+                    else if (bracket.r16?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Round of 16'
+                    else if (bracket.r32?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Round of 32'
                   }
                   const teamBreakdown = p.breakdown?.[n]
                   const matchPts = Math.max(0, (teamBreakdown?.pts || 0) - bonus)
@@ -985,7 +1272,82 @@ export default function LeaguePage() {
               )
             })()}
 
-            {/* Live Scores Widget — shows after WC starts June 11 2026 */}
+            {/* Tournament Simulation — Commissioner only button, results visible to all */}
+            {draftDone && (() => {
+              const simData = bracket?.simData
+              return (
+                <div style={{ background: 'rgba(93,202,165,.06)', border: '1px solid rgba(93,202,165,.2)', borderRadius: 14, padding: '1rem 1.1rem', marginTop: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 14, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text)' }}>
+                        🧪 {simData ? 'Simulation Results' : 'Simulate Tournament'}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
+                        {simData ? `${simData.fixtureCount} matches simulated · 🏆 ${simData.champ}` : 'Generates all 104 matches to test scoring'}
+                      </div>
+                    </div>
+                  </div>
+                  {isCommissioner && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: simData ? 12 : 0 }}>
+                      <button
+                        className="btn btn-primary"
+                        style={{ fontSize: 12, padding: '8px 14px' }}
+                        onClick={simulateTournament}
+                        disabled={simRunning}
+                      >
+                        {simRunning ? '⏳ Simulating...' : simData ? '🔄 Re-run simulation' : '▶ Run simulation'}
+                      </button>
+                      {simData && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090' }}
+                          onClick={clearSimulation}
+                        >
+                          ✕ Clear
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {simData && (
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+                        Simulated Final Standings
+                      </div>
+                      {simData.results
+                        .slice()
+                        .sort((a, b) => b.simPts - a.simPts)
+                        .map((r, i) => {
+                          const m = members.find(mem => mem.user_id === r.user_id)
+                          return (
+                            <div key={r.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < simData.results.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                              <span style={{ fontSize: 13, color: i === 0 ? '#FAC775' : 'var(--text3)', fontWeight: 700, minWidth: 20 }}>
+                                {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`}
+                              </span>
+                              <div className="avatar" style={{ background: AV_BG[(r.draft_slot || 0) % 8], color: AV_FG[(r.draft_slot || 0) % 8], width: 28, height: 28, fontSize: 10 }}>
+                                {getDisplayName(m).slice(0,2).toUpperCase()}
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                                  {getDisplayName(m)} {m?.user_id === user.id && <span style={{ fontSize: 10, color: 'var(--text3)' }}>(you)</span>}
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
+                                  {r.simPicks?.length} teams · {simData.champ && r.simPicks?.includes(simData.champ) ? <span style={{ color: '#FAC775' }}>🏆 has champion</span> : ''}
+                                </div>
+                              </div>
+                              <div style={{ fontFamily: 'var(--mono)', fontWeight: 900, fontSize: 16, color: '#5DCAA5' }}>
+                                {r.simPts} pts
+                              </div>
+                            </div>
+                          )
+                        })}
+                      <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text3)' }}>
+                        💡 Check My Teams and Bracket tabs for full breakdowns
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
             {draftDone && (() => {
               const wcStartDate = new Date('2026-06-11T00:00:00Z')
               const isLive = new Date() >= wcStartDate
@@ -1207,9 +1569,12 @@ export default function LeaguePage() {
                         return next
                       })
                       setPicksOrdered(prev => prev.filter(p => p.id !== lastPick.id && p.team_name !== lastPick.team_name))
-                      // Step 3: go back 1 draft position
+                      // Step 3: go back 1 draft position and reset timer
                       const newPos = Math.max(0, (league?.draft_pos || 1) - 1)
-                      await supabase.from('leagues').update({ draft_pos: newPos }).eq('id', id)
+                      await supabase.from('leagues').update({
+                        draft_pos: newPos,
+                        pick_started_at: new Date().toISOString()
+                      }).eq('id', id)
                       // Real-time will sync other clients via DELETE subscription
                     }}
                   >
@@ -1219,19 +1584,19 @@ export default function LeaguePage() {
                     className="btn btn-secondary"
                     style={{ fontSize: 12, padding: '8px 14px', color: '#FF9090', borderColor: 'rgba(255,75,75,.3)' }}
                     onClick={async () => {
-                      if (!window.confirm('Restart the entire draft? ALL picks deleted, everyone starts over.')) return
-                      // Step 1: Clear local state immediately on commissioner's screen
-                      setPicks({})
-                      setPicksOrdered([])
-                      setBracket(null)
-                      setDraftStarted(false)
-                      setTimeLeft(PICK_TIMER)
-                      // Step 2: Delete all picks from DB
+                      if (!window.confirm('Restart the entire draft? ALL picks will be deleted and the draft will go back to not started.')) return
+                      // Step 1: Reset league in DB first — real-time fires for all clients
+                      await supabase.from('leagues').update({
+                        draft_pos: 0,
+                        draft_started: false,
+                        bracket_data: null,
+                        pick_started_at: null,
+                        scheduled_at: null
+                      }).eq('id', id)
+                      // Step 2: Delete all picks — real-time DELETE fires for all clients
                       await supabase.from('picks').delete().eq('league_id', id)
-                      // Step 3: Reset league — UPDATE subscription fires for all other clients
-                      await supabase.from('leagues')
-                        .update({ draft_pos: 0, draft_started: false, bracket_data: null })
-                        .eq('id', id)
+                      // Step 3: load() is called by the real-time handler — no local state changes here
+                      // This prevents the flash caused by multiple rapid state updates
                     }}
                   >
                     🔄 Restart draft
@@ -1397,15 +1762,11 @@ export default function LeaguePage() {
                     let stageLabel = 'Group stage'
                     if (bracket) {
                       if (bracket.champ?.n === selectedTeam) stageLabel = 'Champion'
-                      else {
-                        for (const { d, l } of [
-                          { d: bracket.final, l: 'Runner-up' },
-                          { d: bracket.sf, l: 'Semi-final' },
-                          { d: bracket.qf, l: 'Quarter-final' },
-                          { d: bracket.r16, l: 'Round of 16' },
-                          { d: bracket.r32, l: 'Round of 32' },
-                        ]) { if (d?.some(m => m.w?.n === selectedTeam)) { stageLabel = l; break } }
-                      }
+                      else if (bracket.final?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Final'
+                      else if (bracket.sf?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Semi-final'
+                      else if (bracket.qf?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Quarter-final'
+                      else if (bracket.r16?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Round of 16'
+                      else if (bracket.r32?.some(m => m.a?.n === selectedTeam || m.b?.n === selectedTeam)) stageLabel = 'Round of 32'
                     }
                     return (
                       <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 500, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setSelectedTeam(null)}>
@@ -1491,15 +1852,11 @@ export default function LeaguePage() {
                       let stageLabel = 'Group stage'
                       if (bracket) {
                         if (bracket.champ?.n === n) stageLabel = 'Champion'
-                        else {
-                          for (const { d, l } of [
-                            { d: bracket.final, l: 'Runner-up' },
-                            { d: bracket.sf, l: 'Semi-final' },
-                            { d: bracket.qf, l: 'Quarter-final' },
-                            { d: bracket.r16, l: 'Round of 16' },
-                            { d: bracket.r32, l: 'Round of 32' },
-                          ]) { if (d?.some(m => m.w?.n === n)) { stageLabel = l; break } }
-                        }
+                        else if (bracket.final?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Final'
+                        else if (bracket.sf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Semi-final'
+                        else if (bracket.qf?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Quarter-final'
+                        else if (bracket.r16?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Round of 16'
+                        else if (bracket.r32?.some(m => m.a?.n === n || m.b?.n === n)) stageLabel = 'Round of 32'
                       }
                       return (
                         <div key={n} onClick={() => setSelectedTeam(n)} style={{ background: 'var(--bg2)', border: `1px solid ${selectedTeam === n ? 'var(--clay)' : 'var(--border)'}`, borderRadius: 10, padding: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>

@@ -48,6 +48,7 @@ body {
   background: rgba(12,21,16,0.96);
   border-bottom: 1px solid var(--border);
   padding: 0 1rem;
+  padding-top: env(safe-area-inset-top, 0px);
   position: sticky;
   top: 0;
   z-index: 100;
