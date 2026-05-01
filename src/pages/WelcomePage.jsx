@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import DubUpLogo, { DubUpLogoLarge } from '../components/DubUpLogo'
-import stackedImg from '../assets/dubup-logo-stacked.png'
-import iconImg from '../assets/dubup-logo-icon.png'
+import stackedImg from '../assets/dubup-logo-stacked.svg'
+import iconImg from '../assets/dubup-logo-icon.svg'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
@@ -53,7 +53,7 @@ export default function WelcomePage() {
 
         {/* Tagline */}
         <div style={{ fontSize: 15, color: 'var(--sand)', marginBottom: 48, letterSpacing: '.04em', textAlign: 'center', lineHeight: 1.7, fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase' }}>
-          Play for Pride.<br/>Play for Money.<br/><span style={{ color: 'var(--clay)' }}>Play for Dubs.</span>
+          Play for Pride.<br/>Play for Glory.<br/><span style={{ color: 'var(--clay)' }}>Play for Dubs.</span>
         </div>
 
         {/* Select a game CTA */}
@@ -87,7 +87,7 @@ export default function WelcomePage() {
                 <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 16, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>
                   World Cup Fantasy
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--text2)' }}>FIFA World Cup 2026 · June 11</div>
+                <div style={{ fontSize: 12, color: 'var(--text2)' }}>World Cup 2026 · June 11</div>
                 <div style={{ marginTop: 6 }}>
                   <span style={{ fontSize: 10, background: 'rgba(193,73,46,.15)', color: 'var(--clay-light)', border: '1px solid rgba(193,73,46,.3)', borderRadius: 4, padding: '2px 8px', fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>
                     Active

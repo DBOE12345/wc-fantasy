@@ -236,13 +236,9 @@ export default function LeaguePage() {
     const alreadyDone = (lg.draft_pos || 0) >= snakeOrder(lg.size || 4, 48).length || (pickData?.length || 0) >= 48
     if (alreadyDone) prevDraftDoneRef.current = true
 
-    // Bracket
+    // Bracket - only load if manually simulated (no auto-simulation)
     if (lg.bracket_data) {
       try { setBracket(JSON.parse(lg.bracket_data)) } catch(e) {}
-    } else if (pickData?.length >= 48) {
-      const b = simulateBracket()
-      setBracket(b)
-      await supabase.from('leagues').update({ bracket_data: JSON.stringify(b) }).eq('id', id)
     }
 
     // Chat
@@ -282,6 +278,8 @@ export default function LeaguePage() {
         return [...prev, newPick]
       })
       playSound('pick')
+      // NOTE: timer reset happens when leagues UPDATE fires with new pick_started_at
+      // Do NOT call setTimeLeft here - it causes race conditions
     })
 
     // PICKS - DELETE: pick reversed
@@ -357,7 +355,7 @@ export default function LeaguePage() {
     .on('postgres_changes', {
       event: 'UPDATE', schema: 'public', table: 'league_members', filter: `league_id=eq.${id}`
     }, () => {
-      // Reload members only - don't call full load() which can reset draft_pos
+      // Reload members and update mySlot so new draft order takes effect immediately
       supabase
         .from('league_members').select('*').eq('league_id', id).order('draft_slot')
         .then(async ({ data: mems }) => {
@@ -369,6 +367,9 @@ export default function LeaguePage() {
           ;(profilesData || []).forEach(p => { profileMap[p.id] = p })
           const memsWithProfiles = mems.map(m => ({ ...m, profile: profileMap[m.user_id] || null }))
           setMembers(memsWithProfiles)
+          // CRITICAL: update mySlot with the NEW draft_slot after reorder
+          const me = mems.find(m => m.user_id === user.id)
+          if (me?.draft_slot != null) setMySlot(me.draft_slot)
         })
     })
 
@@ -874,7 +875,7 @@ export default function LeaguePage() {
         matches.forEach(m => makeKOFixture(m, round))
       })
 
-      // Step 3: Calculate points for all members
+      // Step 3: Calculate points for all members using full match scoring
       const results = members.map(m => {
         const mPicks = Object.entries(picks).filter(([, uid]) => uid === m.user_id).map(([t]) => t)
         const { total, breakdown } = calcTotalPoints(fakeFixtures, mPicks, bracket.stageBonus || {})
@@ -887,15 +888,18 @@ export default function LeaguePage() {
       }).sort((a, b) => b.simPts - a.simPts)
 
       setSimResults({ results, bracket, fixtures: fakeFixtures })
+      // Update fixtures state so My Teams tab shows per-match breakdowns
       setFixtures(fakeFixtures)
 
-      // Save bracket and sim results to DB so ALL players can see them
+      // Save to DB so ALL players see results
+      // Store full breakdown per player for My Teams tab
       const simData = {
         results: results.map(r => ({
           user_id: r.user_id,
           draft_slot: r.draft_slot,
           simPts: r.simPts,
           simPicks: r.simPicks,
+          breakdown: r.simBreakdown,
         })),
         fixtureCount: fakeFixtures.length,
         champ: bracket.champ?.n,

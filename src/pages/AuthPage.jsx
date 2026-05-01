@@ -93,6 +93,9 @@ export default function AuthPage() {
             <div style={{ fontSize: 32, marginBottom: 8 }}>📧</div>
             <div className="auth-title" style={{ fontSize: 18 }}>Check your email</div>
             <div className="auth-sub">We sent a 6-digit code to<br/><strong style={{ color: 'var(--text)' }}>{pendingEmail}</strong></div>
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 8, background: 'rgba(255,200,0,.06)', border: '1px solid rgba(255,200,0,.2)', borderRadius: 8, padding: '8px 12px' }}>
+              📬 If you don't see it, check your <strong style={{ color: 'var(--text2)' }}>spam or junk folder</strong>
+            </div>
           </div>
           {error && <div className="error-msg">{error}</div>}
           <div className="form-group">
@@ -156,6 +159,9 @@ export default function AuthPage() {
               <div className="auth-title" style={{ fontSize: 18, marginBottom: 8 }}>Check your email</div>
               <div className="auth-sub">We sent a password reset link to<br/><strong style={{ color: 'var(--text)' }}>{email}</strong></div>
               <div style={{ fontSize: 13, color: 'var(--text3)', marginTop: 12 }}>Click the link in the email to reset your password, then come back to sign in.</div>
+              <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 8, background: 'rgba(255,200,0,.06)', border: '1px solid rgba(255,200,0,.2)', borderRadius: 8, padding: '8px 12px' }}>
+                📬 If you don't see it, check your <strong style={{ color: 'var(--text2)' }}>spam or junk folder</strong>
+              </div>
             </div>
           )}
           <div style={{ textAlign: 'center', marginTop: 16 }}>
