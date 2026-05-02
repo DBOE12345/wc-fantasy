@@ -155,7 +155,10 @@ export default function LeaguePage() {
   const [members, setMembers] = useState([])
   const [picks, setPicks] = useState({})
   const [mySlot, setMySlot] = useState(null) // null = not loaded yet
-  const [bracket, setBracket] = useState(null)
+  // Derive bracket directly from league.bracket_data
+  // This means when league updates via real-time, bracket automatically reflects DB state
+  // No separate state needed - commissioner clearing bracket_data clears it for everyone
+  const bracket = league?.bracket_data ? (() => { try { return JSON.parse(league.bracket_data) } catch(e) { return null } })() : null
   const [fixtures, setFixtures] = useState([])
   const [tab, setTab] = useState('league')
   const [loading, setLoading] = useState(true)
@@ -239,9 +242,7 @@ export default function LeaguePage() {
     if (alreadyDone) prevDraftDoneRef.current = true
 
     // Bracket - only load if manually simulated (no auto-simulation)
-    if (lg.bracket_data) {
-      try { setBracket(JSON.parse(lg.bracket_data)) } catch(e) {}
-    }
+    // bracket is derived from league.bracket_data - no need to set separately
 
     // Chat
     const { data: msgs } = await supabase
@@ -314,7 +315,6 @@ export default function LeaguePage() {
           if (wasReset) {
             setPicks({})
             setPicksOrdered([])
-            setBracket(null)
             setDraftStarted(false)
             setDraftComplete(false)
             setTimeLeft(PICK_TIMER)
@@ -331,11 +331,9 @@ export default function LeaguePage() {
             return nowStarted
           })
 
-          if (updated.bracket_data) {
-            try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
-          } else {
-            // bracket_data is null - simulation was cleared by commissioner
-            setBracket(null)
+          // bracket is derived from league.bracket_data - no separate setBracket needed
+          // When league updates, bracket automatically reflects new state
+          if (!updated.bracket_data) {
             setFixtures([])
             setSimResults(null)
           }
@@ -948,7 +946,7 @@ export default function LeaguePage() {
       await supabase.from('leagues').update({
         bracket_data: JSON.stringify({ ...bracket, simData })
       }).eq('id', id)
-      setBracket({ ...bracket, simData })
+      setLeague(prev => prev ? { ...prev, bracket_data: JSON.stringify({ ...bracket, simData }) } : prev)
 
     } catch(e) {
       alert('Simulation error: ' + e.message)
@@ -959,7 +957,8 @@ export default function LeaguePage() {
   function clearSimulation() {
     setSimResults(null)
     setFixtures([])
-    setBracket(null)
+    // Clear bracket_data in league state immediately for commissioner
+    setLeague(prev => prev ? { ...prev, bracket_data: null } : prev)
     // Write sim_cleared_at to guarantee real-time fires for all players
     // bracket_data is too large for Supabase free tier to include in real-time payload
     supabase.from('leagues').update({
