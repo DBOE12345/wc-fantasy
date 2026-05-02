@@ -298,45 +298,48 @@ export default function LeaguePage() {
     // LEAGUE - UPDATE
     .on('postgres_changes', {
       event: 'UPDATE', schema: 'public', table: 'leagues', filter: `id=eq.${id}`
-    }, (payload) => {
-      // Use payload.new directly - it contains the committed values
-      const updated = payload.new
-      if (!updated || !updated.id) return
+    }, () => {
+      // Always fetch fresh from DB - payload.new may be incomplete without replica identity full
+      // This guarantees pick_started_at and all other columns are always up to date
+      supabase.from('leagues').select('*').eq('id', id).single()
+        .then(({ data: updated }) => {
+          if (!updated) return
 
-      setLeague(prev => ({ ...prev, ...updated }))
-      draftPosRef.current = updated.draft_pos || 0
+          setLeague(updated)
+          draftPosRef.current = updated.draft_pos || 0
 
-      const nowStarted = !!updated.draft_started
-      const wasReset = !updated.draft_started && updated.draft_pos === 0
+          const nowStarted = !!updated.draft_started
+          const wasReset = !updated.draft_started && updated.draft_pos === 0
 
-      if (wasReset) {
-        setPicks({})
-        setPicksOrdered([])
-        setBracket(null)
-        setDraftStarted(false)
-        setDraftComplete(false)
-        setTimeLeft(PICK_TIMER)
-        setScheduledTime('')
-        setTab('league')
-        return
-      }
+          if (wasReset) {
+            setPicks({})
+            setPicksOrdered([])
+            setBracket(null)
+            setDraftStarted(false)
+            setDraftComplete(false)
+            setTimeLeft(PICK_TIMER)
+            setScheduledTime('')
+            setTab('league')
+            return
+          }
 
-      setDraftStarted(prev => {
-        if (!prev && nowStarted && !didStartRef.current) {
-          try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
-          setTimeout(() => setTab('draft'), 500)
-        }
-        return nowStarted
-      })
+          setDraftStarted(prev => {
+            if (!prev && nowStarted && !didStartRef.current) {
+              try { getAudioCtx(); setTimeout(() => playSound('draft_start'), 200) } catch(e) {}
+              setTimeout(() => setTab('draft'), 500)
+            }
+            return nowStarted
+          })
 
-      if (updated.bracket_data) {
-        try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
-      } else if (updated.bracket_data === null) {
-        // Commissioner cleared the simulation - clear for all players
-        setBracket(null)
-        setFixtures([])
-        setSimResults(null)
-      }
+          if (updated.bracket_data) {
+            try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
+          } else {
+            // bracket_data is null or undefined - simulation was cleared
+            setBracket(null)
+            setFixtures([])
+            setSimResults(null)
+          }
+        })
     })
 
     // LEAGUE_MEMBERS - INSERT: new player joined
@@ -553,10 +556,8 @@ export default function LeaguePage() {
               autoPickFiredRef.current = freshLeague.pick_started_at
             }
 
-            // Use actual pick count as source of truth - same as display logic
-            const { count: totalPicks } = await supabase
-              .from('picks').select('id', { count: 'exact', head: true }).eq('league_id', id)
-            const effectivePos = Math.max(freshLeague.draft_pos, totalPicks || 0)
+            // Use DB draft_pos as source of truth
+            const effectivePos = freshLeague.draft_pos
 
             // Only fire if it is actually MY turn right now
             if (getTurn(effectivePos, freshLeague.size) !== mySlot) return
@@ -612,8 +613,9 @@ export default function LeaguePage() {
         .from('leagues').select('draft_pos, size, draft_started').eq('id', id).single()
       if (!lg?.draft_started) return
 
-      // Use the higher of DB draft_pos or actual pick count
-      const effectivePos = Math.max(lg.draft_pos, picksOrdered.length)
+      // Use DB draft_pos as source of truth - NOT picksOrdered.length
+      // picksOrdered is stale React state and causes position jumps
+      const effectivePos = lg.draft_pos
       const turn = getTurn(effectivePos, lg.size)
       if (turn !== mySlot) return
 
@@ -1027,7 +1029,7 @@ export default function LeaguePage() {
   // Use picksOrdered.length as the source of truth for whose turn it is
   // This is more reliable than league.draft_pos because picks INSERT
   // real-time fires correctly on all devices
-  const draftPos = Math.max(league?.draft_pos || 0, picksOrdered.length)
+  const draftPos = league?.draft_pos || 0
   const currentTurn = order[draftPos]
   const isMyTurn = currentTurn === mySlot
   const draftDone = draftDoneCalc
