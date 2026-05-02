@@ -334,7 +334,7 @@ export default function LeaguePage() {
           if (updated.bracket_data) {
             try { setBracket(JSON.parse(updated.bracket_data)) } catch(e) {}
           } else {
-            // bracket_data is null or undefined - simulation was cleared
+            // bracket_data is null - simulation was cleared by commissioner
             setBracket(null)
             setFixtures([])
             setSimResults(null)
@@ -960,7 +960,12 @@ export default function LeaguePage() {
     setSimResults(null)
     setFixtures([])
     setBracket(null)
-    supabase.from('leagues').update({ bracket_data: null }).eq('id', id)
+    // Write sim_cleared_at to guarantee real-time fires for all players
+    // bracket_data is too large for Supabase free tier to include in real-time payload
+    supabase.from('leagues').update({
+      bracket_data: null,
+      sim_cleared_at: new Date().toISOString()
+    }).eq('id', id)
   }
 
   function copyCode() {
