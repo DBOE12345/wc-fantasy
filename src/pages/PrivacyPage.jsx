@@ -19,7 +19,7 @@ export default function PrivacyPage() {
     },
     {
       title: '4. How We Share Your Information',
-      body: 'We do not sell, rent, or share your personal information with third parties for marketing. The following is visible to other users within your leagues: your display name, profile photo, draft picks, and league points. Your referral count appears on the public referral leaderboard.\n\nWe use Supabase (supabase.com) as our database and authentication provider. Your data is stored on their infrastructure under their security standards.',
+      body: 'We do not sell, rent, or share your personal information with third parties for marketing. The following is visible to other users within your leagues: your display name, profile photo, draft picks, and league points. Your referral count appears on the public referral leaderboard.\n\nWe use the following service providers to operate the app:\n\n• Supabase (supabase.com) — database and authentication. Your data is stored on their infrastructure under their security standards.\n• Resend (resend.com) — sends transactional emails such as verification codes and password resets. They process recipient email addresses solely for delivery.\n• Netlify (netlify.com) — hosts the application. Their servers may log standard request data such as IP addresses for security and reliability purposes.\n\nThese providers are bound by their own privacy and security obligations and only process data on our behalf.',
     },
     {
       title: '5. Data Storage and Security',
@@ -35,11 +35,11 @@ export default function PrivacyPage() {
     },
     {
       title: '8. Your Rights',
-      body: 'Depending on your location, you may have the following rights regarding your data:\n\n• Access — request a copy of data we hold about you\n• Correction — request we fix inaccurate data\n• Deletion — request permanent deletion of your data\n• Portability — request your data in a portable format\n• Objection — object to certain uses of your data\n\nTo exercise any of these rights, email privacy@dubupfantasy.com. We will respond within 30 days.',
+      body: 'Depending on your location, you may have the following rights regarding your data:\n\n• Access — request a copy of data we hold about you\n• Correction — request we fix inaccurate data\n• Deletion — request permanent deletion of your data\n• Portability — request your data in a portable format\n• Objection — object to certain uses of your data\n\nTo exercise any of these rights, email privacy@dubupfantasy.com. We will respond within 30 days.\n\nCalifornia Residents: If you are a California resident, you have additional rights under the California Consumer Privacy Act (CCPA), including the right to know what categories of personal information we collect, the right to delete personal information, and the right to non-discrimination for exercising your rights. We do not sell personal information. To exercise your CCPA rights, email privacy@dubupfantasy.com.',
     },
     {
       title: '9. Children\'s Privacy',
-      body: 'DubUp Fantasy is not directed at children under 18 years of age. We do not knowingly collect personal information from anyone under 18. If we become aware that we have collected data from a person under 18, we will delete it immediately. If you believe we have inadvertently collected such information, please contact us at privacy@dubupfantasy.com.',
+      body: 'DubUp Fantasy is intended for users aged 13 and older. We do not knowingly collect personal information from children under 13. In compliance with the Children\'s Online Privacy Protection Act (COPPA), if we become aware that we have collected personal data from a child under 13, we will delete it immediately. If you are a parent or guardian and believe your child under 13 has provided us with personal information, please contact us at privacy@dubupfantasy.com so we can take appropriate action.',
     },
     {
       title: '10. Cookies and Tracking',
@@ -52,6 +52,10 @@ export default function PrivacyPage() {
     {
       title: '12. Contact Us',
       body: 'For any privacy-related questions, data requests, or account deletion:\n\nEmail: privacy@dubupfantasy.com\nWebsite: dubupfantasy.com\n\nWe aim to respond to all privacy requests within 30 days.',
+    },
+    {
+      title: '13. Governing Law',
+      body: 'This Privacy Policy is governed by the laws of the State of Florida, United States. Any disputes arising from or related to this Privacy Policy or your use of DubUp Fantasy will be resolved in the courts of the State of Florida.',
     },
   ]
 
