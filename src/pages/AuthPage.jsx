@@ -19,7 +19,15 @@ export default function AuthPage() {
   const [pendingEmail, setPendingEmail] = useState('')
   const [resetMode, setResetMode] = useState(false)
   const [resetSent, setResetSent] = useState(false)
-  const [refCode] = useState(() => new URLSearchParams(window.location.search).get('ref') || '')
+  const [refCode] = useState(() => {
+    // Check URL first, then fall back to localStorage
+    const urlCode = new URLSearchParams(window.location.search).get('ref') || ''
+    if (urlCode) {
+      localStorage.setItem('pendingRefCode', urlCode)
+      return urlCode
+    }
+    return localStorage.getItem('pendingRefCode') || ''
+  })
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -58,26 +66,28 @@ export default function AuthPage() {
       // Process referral now that profile is confirmed
       if (refCode && data?.user) {
         try {
-          // Find referrer by code
+          // Wait briefly for the profile trigger to run
+          await new Promise(resolve => setTimeout(resolve, 500))
           const { data: referrer } = await supabase
             .from('profiles').select('id, referral_count').eq('referral_code', refCode.toUpperCase()).single()
-          if (referrer) {
-            // Increment referrer's count
+          if (referrer && referrer.id !== data.user.id) {
             await supabase.from('profiles')
               .update({ referral_count: (referrer.referral_count || 0) + 1 })
               .eq('id', referrer.id)
           }
+          localStorage.removeItem('pendingRefCode')
         } catch(e) {}
       }
 
       // Generate referral_code for the new user if they don't have one
       if (data?.user) {
         try {
+          await new Promise(resolve => setTimeout(resolve, 500))
           const { data: newProfile } = await supabase
             .from('profiles').select('referral_code, username').eq('id', data.user.id).single()
           if (!newProfile?.referral_code) {
-            const base = (newProfile?.username || pendingEmail.split('@')[0]).slice(0, 6).toUpperCase().replace(/[^A-Z0-9]/g, '')
-            const code = base + Math.floor(Math.random() * 999).toString().padStart(2, '0')
+            const base = (newProfile?.username || pendingEmail.split('@')[0]).slice(0, 6).toUpperCase().replace(/[^A-Z0-9]/g, '') || 'USER'
+            const code = base + Math.floor(Math.random() * 9999).toString().padStart(4, '0')
             await supabase.from('profiles').update({ referral_code: code }).eq('id', data.user.id)
           }
         } catch(e) {}

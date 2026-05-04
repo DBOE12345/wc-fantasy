@@ -61,7 +61,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
+  height: 52px;
   position: relative;
 }
 
@@ -285,8 +285,9 @@ body {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   display: flex;
-  height: 60px;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  height: auto;
+  min-height: 60px;
+  padding-bottom: env(safe-area-inset-bottom, 16px);
 }
 
 /* MOBILE */

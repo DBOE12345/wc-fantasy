@@ -9,7 +9,6 @@ import HowToPlayPage from './pages/HowToPlayPage'
 import TermsPage from './pages/TermsPage'
 import PrivacyPage from './pages/PrivacyPage'
 import ReferralPage from './pages/ReferralPage'
-import InstallPrompt from './components/InstallPrompt'
 import './index.css'
 
 function ProtectedRoute({ children }) {
@@ -35,7 +34,6 @@ function AppRoutes() {
         <Route path="/referral" element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      <InstallPrompt />
     </>
   )
 }
