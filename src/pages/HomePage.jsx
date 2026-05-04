@@ -117,6 +117,7 @@ export default function HomePage() {
               { label: 'Refer Friends', icon: '🌍', action: () => { navigate('/referral'); setProfileOpen(false) } },
               { label: 'Edit Profile', icon: '👤', action: () => { navigate('/profile'); setProfileOpen(false) } },
               { label: 'How to Play', icon: '📖', action: () => { navigate('/how-to-play'); setProfileOpen(false) } },
+              { label: 'Privacy Policy', icon: '🔒', action: () => { navigate('/privacy'); setProfileOpen(false) } },
               { label: 'Sign Out', icon: '🚪', action: () => { signOut(); setProfileOpen(false) }, danger: true },
             ].map(item => (
               <button key={item.label} onClick={item.action} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: item.danger ? '#FF9090' : 'var(--text)', textAlign: 'left', fontFamily: 'var(--font)' }}>

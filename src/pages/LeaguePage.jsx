@@ -957,14 +957,22 @@ export default function LeaguePage() {
   function clearSimulation() {
     setSimResults(null)
     setFixtures([])
-    // Clear bracket_data in league state immediately for commissioner
+    // Clear bracket_data in local league state immediately
     setLeague(prev => prev ? { ...prev, bracket_data: null } : prev)
-    // Write sim_cleared_at to guarantee real-time fires for all players
-    // bracket_data is too large for Supabase free tier to include in real-time payload
+    // Touch draft_pos (keep same value) to force real-time event to fire for all players
+    // bracket_data alone is too large for Supabase real-time to include in payload
     supabase.from('leagues').update({
       bracket_data: null,
-      sim_cleared_at: new Date().toISOString()
+      draft_pos: league?.draft_pos || 0
     }).eq('id', id)
+  }
+
+  async function handleTabChange(newTab) {
+    setTab(newTab)
+    if (newTab === 'league') {
+      const { data: lg } = await supabase.from('leagues').select('*').eq('id', id).single()
+      if (lg) setLeague(lg)
+    }
   }
 
   function copyCode() {
@@ -1546,8 +1554,29 @@ export default function LeaguePage() {
                 </div>
               </>
             ) : draftDone ? (
-              <div style={{ background: 'rgba(29,158,117,.1)', border: '1px solid rgba(29,158,117,.3)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', fontSize: 14, color: '#5DCAA5', fontWeight: 500 }}>
-                ✅ Draft complete — all teams assigned!
+              <div>
+                <div style={{ background: 'rgba(29,158,117,.1)', border: '1px solid rgba(29,158,117,.3)', borderRadius: 10, padding: '12px 16px', marginBottom: '1.25rem', fontSize: 14, color: '#5DCAA5', fontWeight: 500 }}>
+                  ✅ Draft complete — all teams assigned!
+                </div>
+                {isCommissioner && (
+                  <button
+                    className="btn btn-secondary"
+                    style={{ width: '100%', fontSize: 13, padding: '12px', color: '#FF9090', borderColor: 'rgba(255,75,75,.3)', marginBottom: '1rem' }}
+                    onClick={async () => {
+                      if (!window.confirm('Restart the entire draft? ALL picks will be deleted and the draft will reset. Use this for testing only.')) return
+                      await supabase.from('leagues').update({
+                        draft_pos: 0,
+                        draft_started: false,
+                        bracket_data: null,
+                        pick_started_at: null,
+                        scheduled_at: null
+                      }).eq('id', id)
+                      await supabase.from('picks').delete().eq('league_id', id)
+                    }}
+                  >
+                    🔄 Restart Draft
+                  </button>
+                )}
               </div>
             ) : (
               <div className="turn-banner" style={{ justifyContent: 'space-between' }}>
@@ -2177,7 +2206,7 @@ export default function LeaguePage() {
         ].map(item => (
           <button
             key={item.id}
-            onClick={() => setTab(item.id)}
+            onClick={() => handleTabChange(item.id)}
             style={{
               flex: 1,
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',

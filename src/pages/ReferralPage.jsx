@@ -16,7 +16,20 @@ export default function ReferralPage() {
   const [loading, setLoading] = useState(true)
   const [myUsername, setMyUsername] = useState('')
 
-  useEffect(() => { load() }, [user])
+  useEffect(() => {
+    load()
+
+    // Real-time subscription - reload when my profile updates (referral_count changes)
+    const channel = supabase.channel('referral_updates')
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}`
+      }, () => {
+        load() // reload everything when my profile changes
+      })
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [user])
 
   async function load() {
     setLoading(true)
